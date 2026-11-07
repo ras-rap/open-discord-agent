@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   checks.push({
     name: "shell sandbox",
     severity: shellOk ? "ok" : "warn",
-    detail: `mode=${shell.mode} docker=${shell.docker}${shellOk ? "" : " — shell calls will refuse until a docker daemon is reachable"}`,
+    detail: `mode=${shell.mode} docker=${shell.docker ? shell.detail : `unavailable — ${shell.detail}`}${shellOk ? "" : " (shell calls will refuse until the daemon is reachable)"}`,
   });
 
   checks.push({ name: "bridge", severity: "ok", detail: `${config.bridge.host}:${config.bridge.port}` });

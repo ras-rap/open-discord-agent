@@ -101,7 +101,7 @@ export class Commands {
         { name: "servers", value: servers || "none running", inline: false },
         { name: "sessions", value: `${sessions.count()} bound · ${runtime.activeStreams()} streaming`, inline: true },
         { name: "approvals", value: `${approvals.pendingCount()} pending`, inline: true },
-        { name: "sandbox", value: `shell=${shell.mode} · docker=${shell.docker ? "up" : "down"}`, inline: true },
+        { name: "sandbox", value: `shell=${shell.mode} · docker=${shell.docker ? "up" : `down: ${shell.detail.slice(0, 80)}`}`, inline: true },
         { name: "policy", value: `jev=${jevMode}`, inline: true },
         {
           name: "recent decisions",

@@ -12,12 +12,21 @@ export type ShellOutcome = { code: number | null; output: string; mode: "docker"
 const trim = (value: string) =>
   value.length > MAX_OUTPUT ? `${value.slice(0, MAX_OUTPUT)}\n… truncated ${value.length - MAX_OUTPUT} chars` : value;
 
-async function dockerUsable(): Promise<boolean> {
+type DockerProbe = { ok: boolean; detail: string };
+
+async function dockerUsable(): Promise<DockerProbe> {
   try {
     const proc = Bun.spawn(["docker", "version", "--format", "{{.Server.Version}}"], { stdout: "pipe", stderr: "pipe" });
-    return (await proc.exited) === 0;
-  } catch {
-    return false;
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (code === 0) return { ok: true, detail: `server ${stdout.trim()}` };
+    const reason = stderr.trim().split("\n").filter(Boolean).slice(-2).join(" ");
+    return { ok: false, detail: reason || `docker version exited ${code}` };
+  } catch (error) {
+    return { ok: false, detail: String(error).slice(0, 200) };
   }
 }
 
@@ -89,13 +98,14 @@ export async function runShell(guildId: string, command: string): Promise<string
     return `[host] exit=${result.code}\n${result.output}`;
   }
 
-  if (!(await dockerUsable())) {
+  const docker = await dockerUsable();
+  if (!docker.ok) {
     if (shellConfig.fallback === "host") {
-      logger.warn("docker unavailable; falling back to host shell", { guildId });
+      logger.warn("docker unavailable; falling back to host shell", { guildId, reason: docker.detail });
       const result = await spawnCaptured([Bun.env.SHELL ?? "/bin/sh", "-lc", command], workspace);
-      return `[host fallback: docker unavailable] exit=${result.code}\n${result.output}`;
+      return `[host fallback: docker unavailable (${docker.detail})] exit=${result.code}\n${result.output}`;
     }
-    throw new Error("docker is not available and shell.fallback is \"error\"; refusing to run on the host");
+    throw new Error(`docker is not available (${docker.detail}) and shell.fallback is "error"; refusing to run on the host`);
   }
 
   const container = await ensureContainer(guildId, shellConfig.image, workspace);
@@ -103,6 +113,7 @@ export async function runShell(guildId: string, command: string): Promise<string
   return `[docker ${container}] exit=${result.code}\n${result.output}`;
 }
 
-export async function shellStatus(): Promise<{ docker: boolean; mode: string }> {
-  return { docker: await dockerUsable(), mode: config.shellDefaults.mode };
+export async function shellStatus(): Promise<{ docker: boolean; detail: string; mode: string }> {
+  const probe = await dockerUsable();
+  return { docker: probe.ok, detail: probe.detail, mode: config.shellDefaults.mode };
 }
