@@ -1,0 +1,7 @@
+{
+  "123456789012345678": {
+    "enabled": true,
+    "shell": { "mode": "docker", "image": "debian:bookworm-slim", "fallback": "error" },
+    "roles": { "admin": ["111111111111111111"], "trusted": ["222222222222222222"] }
+  }
+}

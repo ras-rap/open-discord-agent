@@ -1,0 +1,34 @@
+{
+  "name": "open-discord-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord-native coding agent on the opencode backend",
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "doctor": "bun run src/cli/doctor.ts",
+    "smoke": "bun run src/cli/smoke.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "auth": "bun run src/cli/auth.ts",
+    "e2e": "bun run src/cli/e2e.ts"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "1.19.5",
+    "discord.js": "14.28.1",
+    "discordx": "11.13.3",
+    "opencode-ai": "1.19.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "typescript": "^5.7.2"
+  },
+  "trustedDependencies": [
+    "opencode-ai"
+  ]
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=open-discord-agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opencode
+WorkingDirectory=/opt/open-discord-agent
+ExecStart=/home/opencode/.bun/bin/bun run src/index.ts
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=JEV_MODE=shadow
+# .env supplies DISCORD_TOKEN, BOT_CLIENT_ID, OWNER_ID
+EnvironmentFile=/opt/open-discord-agent/.env
+KillSignal=SIGTERM
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
