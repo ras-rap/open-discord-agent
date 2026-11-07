@@ -13,18 +13,18 @@ export const jevMode: JevMode = (() => {
   return raw === "off" || raw === "enforce" ? raw : "shadow";
 })();
 
-type StoredToken = { access?: string; refresh?: string; expires?: number };
+type StoredToken = { token?: string; access?: string; refresh?: string; expires?: number; kind?: string; integration?: string };
 
 /**
- * Jev is served by OpenCode Zen, not TypeSafe, and authenticates with the OpenCode console OAuth access
- * token (PLAN.md §0.1). The token is read from the bot's private dir first, then the environment.
+ * Jev is served by OpenCode Zen and authenticates with whichever OpenCode credential exists on this machine
+ * (console OAuth `access`, or an OpenCode Go API key). `bun run auth` probes them and stores the winner here.
  */
 export function consoleToken(): string | undefined {
   if (Bun.env.OPENCODE_CONSOLE_TOKEN) return Bun.env.OPENCODE_CONSOLE_TOKEN;
   if (!existsSync(paths.token)) return undefined;
   try {
     const parsed = JSON.parse(readFileSync(paths.token, "utf8")) as StoredToken;
-    return parsed.access;
+    return parsed.token ?? parsed.access;
   } catch (error) {
     logger.warn("console token file unreadable", { error: String(error).slice(0, 120) });
     return undefined;
