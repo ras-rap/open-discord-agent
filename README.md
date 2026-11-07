@@ -134,3 +134,4 @@ journalctl -u oda -f
 | member list is empty | `GuildMembers` intent not enabled in the Discord dev portal |
 | shell refuses with "docker is not available" | start Docker or set `shell.mode: "host"` for that guild |
 | approvals never appear | check `/status` → `policy`; the event name is `permission.asked` (not `permission.updated`) |
+| a command says "The application did not respond" | the handler threw, was used in a DM, or the command definition has not reached that guild yet — set `REGISTER_GUILD_ID` in `.env` so commands are published guild-scoped, and check the `interaction received` log line |
