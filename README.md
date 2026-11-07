@@ -127,6 +127,8 @@ journalctl -u oda -f
 
 ## Troubleshooting
 
+Run exactly one instance per bot token: a second login invalidates the first gateway session and interactions then go unanswered.
+
 | Symptom | Cause |
 | --- | --- |
 | `opencode binary not found` | postinstall skipped → `bun pm trust opencode-ai && bun install` |
@@ -134,4 +136,5 @@ journalctl -u oda -f
 | member list is empty | `GuildMembers` intent not enabled in the Discord dev portal |
 | shell refuses with "docker is not available" | start Docker or set `shell.mode: "host"` for that guild |
 | approvals never appear | check `/status` → `policy`; the event name is `permission.asked` (not `permission.updated`) |
+| commands appear twice | exactly one scope may hold them: set `REGISTER_GUILD_ID` (guild-scoped, instant, globals cleared) or leave it unset (global, guild copies cleared) |
 | a command says "The application did not respond" | the handler threw, was used in a DM, or the command definition has not reached that guild yet — set `REGISTER_GUILD_ID` in `.env` so commands are published guild-scoped, and check the `interaction received` log line |

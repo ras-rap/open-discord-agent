@@ -62,20 +62,30 @@ export function createDiscordClient(): Client {
     await client.initApplicationCommands();
     logger.info("application commands registered");
 
-    // Global commands can take up to an hour to reach a client's cache, which shows up as a command that
-    // "does not respond". Setting REGISTER_GUILD_ID mirrors them into that guild immediately.
+    // Discord shows global and guild-scoped commands as separate entries, so exactly one scope may hold them.
+    // REGISTER_GUILD_ID publishes guild-scoped (instant) and clears the global set; otherwise the reverse.
+    const application = client.application;
+    if (!application) return;
     const guildId = Bun.env.REGISTER_GUILD_ID;
-    if (guildId && client.application) {
-      try {
-        const global = await client.application.commands.fetch();
+    try {
+      if (guildId) {
+        const global = await application.commands.fetch();
         const guild = await client.guilds.fetch(guildId);
-        // discord.js types toJSON() as unknown; the payload is the same shape the REST call expects.
+        // discord.js types toJSON() as unknown; the payload matches what the REST call expects.
         const payload = [...global.values()].map((command) => command.toJSON() as ApplicationCommandDataResolvable);
         await guild.commands.set(payload);
-        logger.info("guild-scoped commands published", { guild: guild.name, count: global.size });
-      } catch (error) {
-        logger.warn("could not publish guild-scoped commands", { error: String(error).slice(0, 200) });
+        await application.commands.set([]);
+        logger.info("commands are guild-scoped", { guild: guild.name, count: payload.length, globalsCleared: global.size });
+      } else {
+        for (const guild of client.guilds.cache.values()) {
+          const scoped = await guild.commands.fetch();
+          if (scoped.size === 0) continue;
+          await guild.commands.set([]);
+          logger.info("cleared guild-scoped duplicates", { guild: guild.name, removed: scoped.size });
+        }
       }
+    } catch (error) {
+      logger.warn("command scope reconciliation failed", { error: String(error).slice(0, 300) });
     }
   });
 
