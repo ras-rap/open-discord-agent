@@ -1,20 +1,64 @@
 {
   "compilerOptions": {
-    "lib": ["ESNext"],
-    "target": "ESNext",
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
+    "target": "ES2022",
     "module": "ESNext",
+    "outDir": "./dist",
+    "noEmit": true,
     "moduleResolution": "bundler",
     "moduleDetection": "force",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
-    "noEmit": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": false,
     "strict": true,
-    "skipLibCheck": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "types": ["bun"],
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": false
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@utils/*": [
+        "./src/utils/*"
+      ],
+      "@guards/*": [
+        "./src/guards/*"
+      ],
+      "@services/*": [
+        "./src/services/*"
+      ],
+      "@commands/*": [
+        "./src/commands/*"
+      ],
+      "@events/*": [
+        "./src/events/*"
+      ],
+      "@cli/*": [
+        "./src/cli/*"
+      ]
+    },
+    "types": [
+      "bun"
+    ]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

@@ -16,28 +16,28 @@ were contradicted by measurement (see §0).
 
 ### 0.1 Environment
 
-| Fact | Value | How verified |
-| --- | --- | --- |
-| `opencode` on PATH | `v2.0.32` | `opencode --version` |
-| npm `opencode-ai` `latest` | **`1.19.5`** (2.x is not published as `latest`) | `npm view opencode-ai dist-tags` |
-| `@opencode-ai/sdk` `latest` / `dev` | `1.19.5` / `0.0.0-dev-202610280534` | `npm view` |
-| **2.0.32 has no matching SDK** | both SDK builds request `/global/health`, `/session`, `/config`; 2.0.32 serves the API under **`/api/*`** behind HTTP basic auth and returns SPA HTML for the SDK paths → `Request is not supported by this version of OpenCode Server` | probes against live 2.0.32 server |
-| 1.19.5 pair works | `opencode-ai@1.19.5` server + `@opencode-ai/sdk@1.19.5`: `/global/health` → `{"healthy":true,"version":"1.19.5"}`, `/config/providers`, `/agent`, `/session`, `/event` all JSON | live probes |
-| Windows binary | npm install pulls `opencode-windows-x64@1.19.5`; binary runs; `debug paths` honors `XDG_DATA_HOME`/`XDG_STATE_HOME`/`XDG_CACHE_HOME` | live |
-| State collision | 1.19.5 against 2.0.32's data dir aborts: `Database is not empty and has no session table` → bot needs its own data dir | observed failure |
-| Model entitlement | `opencode` provider ships `options.apiKey:"public"`; free models work with **no** credentials | `/config/providers` |
-| Pinned catalog lacks crouton | 1.19.5 offers `beam-free`, `deepseek-v4.1-flash-free`, `flint-40b-free`, `glm-5.3-flash-free`, `mimo-v2.6-flash-free`, `nemotron-*` — **no `crouton-alpha-free`**; prompting it fails with `Model not found: opencode/crouton-alpha-free` | `/config/providers` + session.error |
-| Fix: declare the model | a `provider.opencode.models["crouton-alpha-free"]` entry (`api.npm: "@ai-sdk/openai"`, `api.url: …/inference/openai/v1`) makes the catalog list it and prompts stream `CROUTON_OK` | live trial |
-| E2E prompt | `session.prompt` `opencode/beam-free` → `"SPIKE_OK"`, `cost: 0`; `opencode/crouton-alpha-free` → real answer, `cost: 0` | live runs |
-| Streaming events | `event.subscribe()` → `message.part.delta {field:"text", delta}`, `message.part.updated {part}`, `session.status {status:{type:"busy"\|"idle"}}`, `session.diff {diff}`, `session.idle` | live runs |
-| Jev (OpenCode's) | **not a chat model**; `POST https://opencode.ai/inference/systemone/v1/systemone`, `model:"jev-1.13-free"`, `Authorization: Bearer <opencode console OAuth access token>`; answers `{choice,confidence,probabilities}` / `{noul}` / `{score,legend}`; `usage.cost:0`, `billing_source:"free"` | live call, 200 |
-| Credentials | `opencode auth export` → `integrationID:"opencode"`, `value.type:"oauth"`, `access` (`st_…`), `refresh` (`rt_…`), `expires` (ms) | `opencode auth export` |
-| **Config + tool discovery is per server cwd** | server started in `spike/` → `/config` empty, `/experimental/tool/ids` lacks the workspace tool, `?directory=<workspace>` changes nothing; server started **in** the workspace → `permission:{edit:"deny",bash:"ask"}` loaded and tool `spike` discovered | three live probes |
-| Custom tool context | tool executed and returned `dir=C:\…\.spike-ws`, `session=ses_…`, i.e. `ctx.directory` + `ctx.sessionID` are real → bridge can derive guild/session identity | live tool call |
-| Permission ask contract | event `permission.asked` → `{id, sessionID, permission:"bash", patterns:["echo hello-permissions"], metadata:{command}, always:["echo *"], tool:{messageID,callID}}`; reply `POST /permission/{requestID}/reply {reply:"once"}` → `200 true`; then `permission.replied`, tool completes (2.2 s) | live round-trip |
-| **SDK event types lag the server** | SDK 1.19.5 types declare `permission.updated`; the 1.19.5 binary emits `permission.asked` / `permission.replied` (confirmed by live capture *and* by strings inside the binary) | live capture + binary grep |
-| Event catalogue (1.19.5, observed) | `server.connected`, `session.updated`, `session.status`, `session.diff`, `session.idle`, `message.updated`, `message.part.updated`, `message.part.delta {field,delta}`, `permission.asked`, `permission.replied` | live runs |
-| Live bridge e2e | real gateway (`Kirby#6618`), model called `discord_channels_list` through the generated workspace tool → bridge → tier gate (`allow`) → discord.js, answer `total=5 Text Channels`; audit row written | `bun run e2e` |
+| Fact                                          | Value                                                                                                                                                                                                                                                                                           | How verified                        |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `opencode` on PATH                            | `v2.0.32`                                                                                                                                                                                                                                                                                       | `opencode --version`                |
+| npm `opencode-ai` `latest`                    | **`1.19.5`** (2.x is not published as `latest`)                                                                                                                                                                                                                                                 | `npm view opencode-ai dist-tags`    |
+| `@opencode-ai/sdk` `latest` / `dev`           | `1.19.5` / `0.0.0-dev-202610280534`                                                                                                                                                                                                                                                             | `npm view`                          |
+| **2.0.32 has no matching SDK**                | both SDK builds request `/global/health`, `/session`, `/config`; 2.0.32 serves the API under **`/api/*`** behind HTTP basic auth and returns SPA HTML for the SDK paths → `Request is not supported by this version of OpenCode Server`                                                         | probes against live 2.0.32 server   |
+| 1.19.5 pair works                             | `opencode-ai@1.19.5` server + `@opencode-ai/sdk@1.19.5`: `/global/health` → `{"healthy":true,"version":"1.19.5"}`, `/config/providers`, `/agent`, `/session`, `/event` all JSON                                                                                                                 | live probes                         |
+| Windows binary                                | npm install pulls `opencode-windows-x64@1.19.5`; binary runs; `debug paths` honors `XDG_DATA_HOME`/`XDG_STATE_HOME`/`XDG_CACHE_HOME`                                                                                                                                                            | live                                |
+| State collision                               | 1.19.5 against 2.0.32's data dir aborts: `Database is not empty and has no session table` → bot needs its own data dir                                                                                                                                                                          | observed failure                    |
+| Model entitlement                             | `opencode` provider ships `options.apiKey:"public"`; free models work with **no** credentials                                                                                                                                                                                                   | `/config/providers`                 |
+| Pinned catalog lacks crouton                  | 1.19.5 offers `beam-free`, `deepseek-v4.1-flash-free`, `flint-40b-free`, `glm-5.3-flash-free`, `mimo-v2.6-flash-free`, `nemotron-*` — **no `crouton-alpha-free`**; prompting it fails with `Model not found: opencode/crouton-alpha-free`                                                       | `/config/providers` + session.error |
+| Fix: declare the model                        | a `provider.opencode.models["crouton-alpha-free"]` entry (`api.npm: "@ai-sdk/openai"`, `api.url: …/inference/openai/v1`) makes the catalog list it and prompts stream `CROUTON_OK`                                                                                                              | live trial                          |
+| E2E prompt                                    | `session.prompt` `opencode/beam-free` → `"SPIKE_OK"`, `cost: 0`; `opencode/crouton-alpha-free` → real answer, `cost: 0`                                                                                                                                                                         | live runs                           |
+| Streaming events                              | `event.subscribe()` → `message.part.delta {field:"text", delta}`, `message.part.updated {part}`, `session.status {status:{type:"busy"\|"idle"}}`, `session.diff {diff}`, `session.idle`                                                                                                         | live runs                           |
+| Jev (OpenCode's)                              | **not a chat model**; `POST https://opencode.ai/inference/systemone/v1/systemone`, `model:"jev-1.13-free"`, `Authorization: Bearer <opencode console OAuth access token>`; answers `{choice,confidence,probabilities}` / `{noul}` / `{score,legend}`; `usage.cost:0`, `billing_source:"free"`   | live call, 200                      |
+| Credentials                                   | `opencode auth export` → `integrationID:"opencode"`, `value.type:"oauth"`, `access` (`st_…`), `refresh` (`rt_…`), `expires` (ms)                                                                                                                                                                | `opencode auth export`              |
+| **Config + tool discovery is per server cwd** | server started in `spike/` → `/config` empty, `/experimental/tool/ids` lacks the workspace tool, `?directory=<workspace>` changes nothing; server started **in** the workspace → `permission:{edit:"deny",bash:"ask"}` loaded and tool `spike` discovered                                       | three live probes                   |
+| Custom tool context                           | tool executed and returned `dir=C:\…\.spike-ws`, `session=ses_…`, i.e. `ctx.directory` + `ctx.sessionID` are real → bridge can derive guild/session identity                                                                                                                                    | live tool call                      |
+| Permission ask contract                       | event `permission.asked` → `{id, sessionID, permission:"bash", patterns:["echo hello-permissions"], metadata:{command}, always:["echo *"], tool:{messageID,callID}}`; reply `POST /permission/{requestID}/reply {reply:"once"}` → `200 true`; then `permission.replied`, tool completes (2.2 s) | live round-trip                     |
+| **SDK event types lag the server**            | SDK 1.19.5 types declare `permission.updated`; the 1.19.5 binary emits `permission.asked` / `permission.replied` (confirmed by live capture _and_ by strings inside the binary)                                                                                                                 | live capture + binary grep          |
+| Event catalogue (1.19.5, observed)            | `server.connected`, `session.updated`, `session.status`, `session.diff`, `session.idle`, `message.updated`, `message.part.updated`, `message.part.delta {field,delta}`, `permission.asked`, `permission.replied`                                                                                | live runs                           |
+| Live bridge e2e                               | real gateway (`Kirby#6618`), model called `discord_channels_list` through the generated workspace tool → bridge → tier gate (`allow`) → discord.js, answer `total=5 Text Channels`; audit row written                                                                                           | `bun run e2e`                       |
 
 Consequence of the config-discovery row: **one opencode server per guild workspace**. Config, custom tools, skills, and
 permission rules are resolved once at server start from its cwd, and the `directory` query parameter does not
@@ -45,13 +45,13 @@ re-target them.
 
 ### 0.2 Pinned stack (decision)
 
-| Component | Version | Why |
-| --- | --- | --- |
-| `opencode-ai` | `1.19.5` (project dependency, not the global CLI) | only published version with a matching SDK |
-| `@opencode-ai/sdk` | `1.19.5` | documented client; `session.*`, `event.subscribe` verified. Approval reply is posted directly to `/permission/{requestID}/reply` because the SDK only wraps the legacy `/session/{id}/permissions/{pid}` route |
-| `discordx` / `discord.js` | `11.13.3` / `14.28.1` | current |
-| Runtime | **Bun `1.4.3`** (not Node) — `bun:sqlite` (FTS5), `Bun.spawn`, `Bun.serve` for the bridge; cross-platform Linux/Windows/macOS | installed |
-| SQLite | `bun:sqlite` (no native build step) | built in |
+| Component                 | Version                                                                                                                       | Why                                                                                                                                                                                                            |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `opencode-ai`             | `1.19.5` (project dependency, not the global CLI)                                                                             | only published version with a matching SDK                                                                                                                                                                     |
+| `@opencode-ai/sdk`        | `1.19.5`                                                                                                                      | documented client; `session.*`, `event.subscribe` verified. Approval reply is posted directly to `/permission/{requestID}/reply` because the SDK only wraps the legacy `/session/{id}/permissions/{pid}` route |
+| `discordx` / `discord.js` | `11.13.3` / `14.28.1`                                                                                                         | current                                                                                                                                                                                                        |
+| Runtime                   | **Bun `1.4.3`** (not Node) — `bun:sqlite` (FTS5), `Bun.spawn`, `Bun.serve` for the bridge; cross-platform Linux/Windows/macOS | installed                                                                                                                                                                                                      |
+| SQLite                    | `bun:sqlite` (no native build step)                                                                                           | built in                                                                                                                                                                                                       |
 
 Boot guard: call `/global/health`; refuse to start unless `version === "1.19.5"`. Bumping the pin means
 re-running every check in §0.1 (the 2.0.x API move proves the surface is not stable across majors).
@@ -119,7 +119,7 @@ uses basic auth. Idle workspaces (no prompt, no open session) unload after 30 mi
 IDs persist in bot DB so a respawn resumes via `session.messages`. One live server per guild that is active;
 your server = 1 process.
 
-Rejected: single server + `directory` query (proven not to reload config/tools); one server per *channel*
+Rejected: single server + `directory` query (proven not to reload config/tools); one server per _channel_
 (needless); MCP-hosted tools (no session/directory identity).
 
 ### 1.2 Tool bridge
@@ -187,20 +187,22 @@ sequenceDiagram
 Hard allowlist, one place (`src/agent/models.ts`): `crouton-alpha-free`, `beam-free`, `jev-1.13-free`. Any
 prompt/model switch is validated against it; anything else throws.
 
-| Role | Model | Notes |
-| --- | --- | --- |
-| Primary agent (chat, code, tool use) | `opencode/crouton-alpha-free` | 1M context; **not in the pinned catalog**, so it is declared explicitly in each workspace config (§0.1) |
-| Fast/secondary (title gen, summaries, vision-ish jobs) | `opencode/beam-free` | used for reflection and consolidation to keep the big model free of bulk text |
-| Typed decisions (safety, routing, eval judging) | `jev-1.13-free` | Zen systemone endpoint; returns labels + probabilities, never text |
+| Role                                                   | Model                         | Notes                                                                                                   |
+| ------------------------------------------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Primary agent (chat, code, tool use)                   | `opencode/crouton-alpha-free` | 1M context; **not in the pinned catalog**, so it is declared explicitly in each workspace config (§0.1) |
+| Fast/secondary (title gen, summaries, vision-ish jobs) | `opencode/beam-free`          | used for reflection and consolidation to keep the big model free of bulk text                           |
+| Typed decisions (safety, routing, eval judging)        | `jev-1.13-free`               | Zen systemone endpoint; returns labels + probabilities, never text                                      |
 
 ### 3.3 Jev access
 
 ```ts
 // src/policy/jev.ts
-const ENDPOINT = "https://opencode.ai/inference/systemone/v1/systemone";
-const res = await fetch(ENDPOINT, { method: "POST",
-  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-  body: JSON.stringify({ model: "jev-1.13-free", state, questions }) });
+const ENDPOINT = 'https://opencode.ai/inference/systemone/v1/systemone';
+const res = await fetch(ENDPOINT, {
+  method: 'POST',
+  headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+  body: JSON.stringify({ model: 'jev-1.13-free', state, questions }),
+});
 ```
 
 Token = the OpenCode console OAuth `access` token. Bootstrap: `opencode auth export` (once, at setup) →
@@ -241,15 +243,21 @@ flowchart TD
     "opencode": {
       "models": {
         // required: the pinned server's catalog does not list crouton (§0.1)
-        "crouton-alpha-free": { "api": { "id": "crouton-alpha-free", "url": "https://opencode.ai/inference/openai/v1", "npm": "@ai-sdk/openai" } }
-      }
-    }
+        "crouton-alpha-free": {
+          "api": {
+            "id": "crouton-alpha-free",
+            "url": "https://opencode.ai/inference/openai/v1",
+            "npm": "@ai-sdk/openai",
+          },
+        },
+      },
+    },
   },
   "permission": {
-    "bash":   { "*": "ask", "git status*": "allow", "git diff*": "allow", "ls*": "allow" },
-    "edit":   { "*": "ask", ".opencode/*": "deny", "opencode.json": "deny", "AGENTS.md": "deny" },
-    "webfetch": "ask"
-  }
+    "bash": { "*": "ask", "git status*": "allow", "git diff*": "allow", "ls*": "allow" },
+    "edit": { "*": "ask", ".opencode/*": "deny", "opencode.json": "deny", "AGENTS.md": "deny" },
+    "webfetch": "ask",
+  },
 }
 ```
 
@@ -313,41 +321,50 @@ on non-regression; rollback = git revert.
 
 ---
 
-## 7. Repo layout
+## 7. Repo layout (follows the discord-bot-template conventions)
 
 ```text
 src/
-  index.ts                    bootstrap: config → db → supervisor → bridge → discord → workers
-  config/{schema.ts,load.ts}
-  discord/{client.ts,router.ts,render/{stream.ts,chunks.ts,embeds.ts},commands/*.ts,components/*.ts}
-  agent/{supervisor.ts,client.ts,sessions.ts,events.ts,models.ts,prompt.ts,reflect.ts}
-  bridge/{server.ts,registry.ts,shell.ts,impl/*.ts}
-  policy/{tiers.ts,static.ts,jev.ts,gate.ts,audit.ts}
-  memory/{db.ts,migrations.ts,store.ts,search.ts,inject.ts,consolidate.ts,evolve.ts,evals.ts}
-  obs/{log.ts,metrics.ts,healthz.ts}
-  workers/{queue.ts,scheduler.ts}
-templates/workspace/          copied per guild workspace
-  opencode.json  AGENTS.md  tools/discord.ts.tpl  skills/seed/
-config/                       guilds.json, tiers.json, thresholds.json (git-tracked)
-migrations/*.sql
-tests/                        policy, chunker, memory ranking, session keying
-workspaces/<guildID>/         gitignored runtime sandbox
+  main.ts                  entry: env check, instance lock, @discordx/importer, client.build(), deploy, login
+  client.ts                discordx Client (intents/partials from utils/constants)
+  commands/                slash commands + component interactables
+  events/                  ready, mention prompts, interaction safety net
+  guards/                  cooldown, guildOnly, ownerOnly, guildEnabled
+  cli/                     bun run commands deploy|clear|list|auth|doctor|smoke|e2e
+  services/
+    config.ts              guilds.json, paths, model allowlist, shell defaults
+    agent/                 binary, client, event adapter, supervisor, prompt runtime
+    bridge/                capability registry + loopback RPC server
+    policy/                tier ceilings, Jev client
+    memory/                FTS5 store, injection, reflector
+    workspace/             provisioning, generated tool file, docker/host shell
+    discord/               approvals, stream renderer, service registry
+    database/sqlite.ts     schema and stores
+  utils/                   env, logger (pino), constants, instance lock
+tests/                     policy, memory, chunking
+config/                    guilds.json (runtime, gitignored) + example
+deploy/                    systemd unit
+.data/workspaces/<guild>/  runtime sandbox (gitignored)
 ```
+
+Framework choices inherited from the template: decorator discovery via `@discordx/importer`, guard middleware,
+pino logging (pretty in development, files in production), REST command deployment with a diff CLI, ESLint +
+Prettier, and Bun scripts (`dev`, `start`, `build`, `typecheck`, `lint`, `format`, `commands`, `test`).
 
 ---
 
 ## 8. Phases
 
-| # | Phase | Exit test (observed) | Status |
-| --- | --- | --- | --- |
-| 0 | Spike | pinned pair boots; prompt via `beam-free` + `crouton-alpha-free`; streaming events; jev 200 with typed answers; workspace-rooted server loads `permission` config and discovers a custom tool; `permission.asked` → reply → tool completes | **done** |
-| 1 | Skeleton bot | `/ask` answers in a channel, live tool lines, `/abort` stops, restart resumes | implemented: discordx client, `/ask` `/new` `/abort` `/status` `/audit` `/enable`, mention handler, coalesced renderer, fence-safe chunking, per-chat queue; live login verified (`Kirby#6618`), prompt/streaming verified by `bun run smoke` |
-| 2 | Bridge + static policy | agent creates a channel as admin, denied as member, denial audited | implemented and **verified live** (`bun run e2e`): model → `discord_channels_list` → bridge → `allow`/`tier` → real channel data; 14 capabilities, token-authenticated loopback bridge, channel-derived identity, tier ceilings, audit + tool stats |
-| 3 | Approvals | real `permission.asked` rendered as buttons; `once`/`always`/`reject` all take effect; timeout rejects | implemented and **verified** (`bun run smoke`): `permission.asked` → `POST /permission/{id}/reply` → tool completes; allow-once / always / reject cards, approver tier check, 3-minute timeout, session-end cancellation |
-| 4 | Jev gate | shadow agreement report on real traffic; forced jev failure still denies | client + shadow/enforce modes implemented and called on every non-read bridge decision; live answer observed (`destructive`, P≈0.02) |
-| 5 | Memory v1 | fact from Monday recalled Wednesday in a new session; secret-looking string rejected | implemented: FTS5 store with dedupe/supersede, `beam-free` reflector with credential scrubbing, `<memory>` retrieval injection, `MEMORY.md` digest, `/remember` + `/memory`; unit-tested (11 tests). Recall-across-days still needs a live multi-session run |
-| 6 | Evolution | proposed `SKILL.md` patch eval'd, diff posted, approved, applied, revertible | not implemented yet |
-| 7 | Ops | kill/restart mid-task recovers; backup restores; docker shell works per guild | partial: systemd unit + doctor + idle unload + self-healing supervisor; docker runner written but untested on this Windows box (no daemon) |
+| #   | Phase                  | Exit test (observed)                                                                                                                                                                                                                       | Status                                                                                                                                                                                                                                                                                                                                                                       |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | Spike                  | pinned pair boots; prompt via `beam-free` + `crouton-alpha-free`; streaming events; jev 200 with typed answers; workspace-rooted server loads `permission` config and discovers a custom tool; `permission.asked` → reply → tool completes | **done**                                                                                                                                                                                                                                                                                                                                                                     |
+| 1   | Skeleton bot           | `/ask` answers in a channel, live tool lines, `/abort` stops, restart resumes                                                                                                                                                              | implemented on the template layout: `src/commands/*` decorated slash commands with guards, `/ask` `/new` `/abort` `/status` `/audit` `/enable` `/ping` `/remember` `/memory`, event-driven mention handling, coalesced renderer, fence-safe chunking, per-chat queue; decorator load verified (9 commands, 3 events, 1 button), prompt/streaming verified by `bun run smoke` |
+| 2   | Bridge + static policy | agent creates a channel as admin, denied as member, denial audited                                                                                                                                                                         | implemented and **verified live** (`bun run e2e`): model → `discord_channels_list` → bridge → `allow`/`tier` → real channel data; 14 capabilities, token-authenticated loopback bridge, channel-derived identity, tier ceilings, audit + tool stats                                                                                                                          |
+| 3   | Approvals              | real `permission.asked` rendered as buttons; `once`/`always`/`reject` all take effect; timeout rejects                                                                                                                                     | implemented and **verified** (`bun run smoke`): `permission.asked` → `POST /permission/{id}/reply` → tool completes; allow-once / always / reject cards, approver tier check, 3-minute timeout, session-end cancellation                                                                                                                                                     |
+| 4   | Jev gate               | shadow agreement report on real traffic; forced jev failure still denies                                                                                                                                                                   | client + shadow/enforce modes implemented and called on every non-read bridge decision; live answer observed (`destructive`, P≈0.02)                                                                                                                                                                                                                                         |
+| 5   | Memory v1              | fact from Monday recalled Wednesday in a new session; secret-looking string rejected                                                                                                                                                       | implemented: FTS5 store with dedupe/supersede, `beam-free` reflector with credential scrubbing, `<memory>` retrieval injection, `MEMORY.md` digest, `/remember` + `/memory`; unit-tested (11 tests). Recall-across-days still needs a live multi-session run                                                                                                                 |
+| 6   | Evolution              | proposed `SKILL.md` patch eval'd, diff posted, approved, applied, revertible                                                                                                                                                               | not implemented yet                                                                                                                                                                                                                                                                                                                                                          |
+| 7   | Ops                    | kill/restart mid-task recovers; backup restores; docker shell works per guild                                                                                                                                                              | partial: systemd unit + doctor + idle unload + self-healing supervisor; docker runner written but untested on this Windows box (no daemon)                                                                                                                                                                                                                                   |
 
 ### 0.3 Remaining spike items (not architecture-critical)
 
@@ -360,32 +377,32 @@ workspaces/<guildID>/         gitignored runtime sandbox
 
 ## 9. Risks and fallbacks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| CLI/SDK major drift (2.0.32 already moved to `/api`) | total breakage | pin both at 1.19.5 in `package.json`; boot guard on `/global/health` version; never use the global CLI |
-| Global `opencode` upgrade by you | none to the bot, but confusion | README states the bot has its own copy; `npm run doctor` reports both versions |
-| Config/tool discovery tied to server cwd | wrong config for a guild | supervisor spawns per workspace; a boot self-test asserts the workspace config is loaded and the bridge tool id is present |
-| SDK event types lag the server (`permission.updated` in types vs `permission.asked` on the wire) | approvals silently never fire | all raw events pass through one adapter (`src/agent/events.ts`) that maps observed names, never SDK type names; boot self-test asserts an ask round-trip before the bot reports healthy |
-| Free-tier model availability changes | prompts fail | allowlist in config with ordered fallback (`crouton-alpha-free` → `beam-free`), explicit error to Discord, never silent model swap outside the allowlist |
-| Jev token expiry / refresh failure | no dynamic gate | refresh flow; degrade to human approval; jev answers logged for calibration |
-| Docker unavailable (Windows/WSL, no daemon) | shell cannot run | `shell.mode` flag; `.env` override to `host` with a warning banner in `/status`; deny-list still applies |
-| Prompt injection (Discord text, repo files) | hijacked actions | identity from channel binding; risk classes; jev injection question; immutable config; destructive ops human-approved |
-| Discord rate limits / 2000-char cap | dropped output | edit coalescing, fence-aware chunking, discord.js rest queue |
-| Privileged intents missing (`GuildMembers`, `MessageContent`) | empty member list / no message text | README setup step; `/status` reports intent errors |
-| `better-sqlite3` native build on Node 26 | install failure | `node:sqlite` fallback behind the same store interface |
-| Agent self-modification | silent drift | §5.4 gating, git versioning, non-regression evals |
+| Risk                                                                                             | Impact                              | Mitigation                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLI/SDK major drift (2.0.32 already moved to `/api`)                                             | total breakage                      | pin both at 1.19.5 in `package.json`; boot guard on `/global/health` version; never use the global CLI                                                                                  |
+| Global `opencode` upgrade by you                                                                 | none to the bot, but confusion      | README states the bot has its own copy; `npm run doctor` reports both versions                                                                                                          |
+| Config/tool discovery tied to server cwd                                                         | wrong config for a guild            | supervisor spawns per workspace; a boot self-test asserts the workspace config is loaded and the bridge tool id is present                                                              |
+| SDK event types lag the server (`permission.updated` in types vs `permission.asked` on the wire) | approvals silently never fire       | all raw events pass through one adapter (`src/agent/events.ts`) that maps observed names, never SDK type names; boot self-test asserts an ask round-trip before the bot reports healthy |
+| Free-tier model availability changes                                                             | prompts fail                        | allowlist in config with ordered fallback (`crouton-alpha-free` → `beam-free`), explicit error to Discord, never silent model swap outside the allowlist                                |
+| Jev token expiry / refresh failure                                                               | no dynamic gate                     | refresh flow; degrade to human approval; jev answers logged for calibration                                                                                                             |
+| Docker unavailable (Windows/WSL, no daemon)                                                      | shell cannot run                    | `shell.mode` flag; `.env` override to `host` with a warning banner in `/status`; deny-list still applies                                                                                |
+| Prompt injection (Discord text, repo files)                                                      | hijacked actions                    | identity from channel binding; risk classes; jev injection question; immutable config; destructive ops human-approved                                                                   |
+| Discord rate limits / 2000-char cap                                                              | dropped output                      | edit coalescing, fence-aware chunking, discord.js rest queue                                                                                                                            |
+| Privileged intents missing (`GuildMembers`, `MessageContent`)                                    | empty member list / no message text | README setup step; `/status` reports intent errors                                                                                                                                      |
+| `better-sqlite3` native build on Node 26                                                         | install failure                     | `node:sqlite` fallback behind the same store interface                                                                                                                                  |
+| Agent self-modification                                                                          | silent drift                        | §5.4 gating, git versioning, non-regression evals                                                                                                                                       |
 
 ---
 
 ## 10. Decisions (resolved)
 
-| Question | Answer |
-| --- | --- |
-| Tenancy | multi-guild architecture, one server today (§1.1) |
-| Shell blast radius | `docker` default, `host` optional per guild config |
-| Jev source | OpenCode Zen systemone endpoint, `jev-1.13-free`, console OAuth token (§3.3) |
-| Models | allowlist of exactly `crouton-alpha-free`, `beam-free`, `jev-1.13-free`; primary = crouton, reflector = beam, decisions = jev |
-| SDK pinning | CLI + SDK both 1.19.5 as project deps, own data dir (§0.2) |
+| Question           | Answer                                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Tenancy            | multi-guild architecture, one server today (§1.1)                                                                             |
+| Shell blast radius | `docker` default, `host` optional per guild config                                                                            |
+| Jev source         | OpenCode Zen systemone endpoint, `jev-1.13-free`, console OAuth token (§3.3)                                                  |
+| Models             | allowlist of exactly `crouton-alpha-free`, `beam-free`, `jev-1.13-free`; primary = crouton, reflector = beam, decisions = jev |
+| SDK pinning        | CLI + SDK both 1.19.5 as project deps, own data dir (§0.2)                                                                    |
 
 Setup inputs still needed from you (not blocking design): Discord application client ID + bot token with
 `GuildMembers` and `MessageContent` enabled, and the guild ID to seed `config/guilds.json`.

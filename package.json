@@ -1,34 +1,49 @@
 {
   "name": "open-discord-agent",
-  "version": "0.1.0",
-  "private": true,
+  "module": "src/main.ts",
   "type": "module",
+  "private": true,
+  "version": "0.2.0",
   "description": "Discord-native coding agent on the opencode backend",
   "engines": {
     "bun": ">=1.1.0"
   },
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch run src/index.ts",
-    "doctor": "bun run src/cli/doctor.ts",
-    "smoke": "bun run src/cli/smoke.ts",
+    "dev": "bun --watch src/main.ts",
+    "start": "bun src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "commands": "bun src/cli/index.ts",
+    "auth": "bun src/cli/index.ts auth",
+    "doctor": "bun src/cli/index.ts doctor",
+    "smoke": "bun src/cli/index.ts smoke",
+    "e2e": "bun src/cli/index.ts e2e",
     "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "auth": "bun run src/cli/auth.ts",
-    "e2e": "bun run src/cli/e2e.ts"
+    "test:unit": "bun test tests/"
   },
   "dependencies": {
+    "@discordx/importer": "^1.2.1",
     "@opencode-ai/sdk": "1.19.5",
     "discord.js": "14.28.1",
     "discordx": "11.13.3",
     "opencode-ai": "1.19.5",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/bun": "^1.1.14",
-    "typescript": "^5.7.2"
+    "@eslint/js": "^9.32.0",
+    "@types/bun": "^1.2.19",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
+    "eslint": "^9.32.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-prettier": "^5.5.3",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
   },
-  "trustedDependencies": [
-    "opencode-ai"
-  ]
+  "trustedDependencies": ["opencode-ai"]
 }
