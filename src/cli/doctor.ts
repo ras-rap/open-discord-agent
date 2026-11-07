@@ -51,6 +51,20 @@ async function main(): Promise<void> {
   });
 
   checks.push({ name: "bridge", severity: "ok", detail: `${config.bridge.host}:${config.bridge.port}` });
+
+  // Discord expires interactions after 3s, so a skewed host clock shows up as evry command failing with 10062.
+  try {
+    const response = await fetch("https://discord.com/api/v10/gateway", { method: "HEAD", signal: AbortSignal.timeout(5000) });
+    const header = response.headers.get("date");
+    const skewMs = header ? Date.now() - new Date(header).getTime() : 0;
+    checks.push({
+      name: "clock skew",
+      severity: Math.abs(skewMs) > 5000 ? "warn" : "ok",
+      detail: `${skewMs}ms vs discord.com${Math.abs(skewMs) > 5000 ? " — interactions will expire before we answer; fix NTP" : ""}`,
+    });
+  } catch (error) {
+    checks.push({ name: "clock skew", severity: "warn", detail: `could not reach discord.com: ${String(error).slice(0, 120)}` });
+  }
   checks.push({ name: "capabilities", severity: "ok", detail: `${capabilities.length} discord tools` });
   checks.push({ name: "data dir", severity: existsSync(paths.data) ? "ok" : "error", detail: paths.data });
   checks.push({ name: "guilds enabled", severity: "ok", detail: `${Object.keys(config.raw()).length} in config/guilds.json` });

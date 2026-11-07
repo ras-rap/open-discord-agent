@@ -1,4 +1,5 @@
 import { config } from "./config.ts";
+import { acquireInstanceLock } from "./instance-lock.ts";
 import { log } from "./log.ts";
 import { Runtime } from "./agent/runtime.ts";
 import { Supervisor } from "./agent/supervisor.ts";
@@ -9,6 +10,7 @@ import { services } from "./discord/services.ts";
 const logger = log("boot");
 
 async function main(): Promise<void> {
+  acquireInstanceLock();
   const client = createDiscordClient();
   let runtime: Runtime | undefined;
   const supervisor = new Supervisor((guildId, event) => runtime?.handleEvent(guildId, event));

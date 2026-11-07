@@ -127,7 +127,7 @@ journalctl -u oda -f
 
 ## Troubleshooting
 
-Run exactly one instance per bot token: a second login invalidates the first gateway session and interactions then go unanswered.
+The bot takes a lock at `.data/bot.lock` and refuses to start while another process holds it: a second login invalidates the first gateway session, after which interactions arrive late and every reply fails with `Unknown interaction` (10062).
 
 | Symptom | Cause |
 | --- | --- |
@@ -135,6 +135,7 @@ Run exactly one instance per bot token: a second login invalidates the first gat
 | `server reported version X, expected 1.19.5` | a different binary is being picked up → `bun run doctor`, check `OPENCODE_BIN` |
 | member list is empty | `GuildMembers` intent not enabled in the Discord dev portal |
 | shell refuses with "docker is not available" | start Docker or set `shell.mode: "host"` for that guild |
+| `Unknown interaction` (10062), or commands answer "The application did not respond" | the gateway delivered the interaction after Discord's 3s window — usually a second process on the same token (the lock file now blocks that) or a paused host; `/ping` reports interaction latency, gateway ping and pid |
 | approvals never appear | check `/status` → `policy`; the event name is `permission.asked` (not `permission.updated`) |
 | commands appear twice | exactly one scope may hold them: set `REGISTER_GUILD_ID` (guild-scoped, instant, globals cleared) or leave it unset (global, guild copies cleared) |
 | a command says "The application did not respond" | the handler threw, was used in a DM, or the command definition has not reached that guild yet — set `REGISTER_GUILD_ID` in `.env` so commands are published guild-scoped, and check the `interaction received` log line |

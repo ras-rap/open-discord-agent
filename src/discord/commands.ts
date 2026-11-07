@@ -119,8 +119,12 @@ export class Commands {
   @Slash({ name: "ping", description: "Check that slash commands reach the bot" })
   async ping(interaction: CommandInteraction): Promise<void> {
     const latency = Date.now() - interaction.createdTimestamp;
-    logger.info("ping", { latency, guild: interaction.guildId ?? "dm" });
-    await interaction.reply({ content: `🏓 pong · ${latency}ms`, flags: ["Ephemeral"] as const });
+    const gateway = interaction.client.ws.ping;
+    logger.info("ping", { latency, gateway, guild: interaction.guildId ?? "dm" });
+    await interaction.reply({
+      content: `🏓 pong · interaction ${latency}ms · gateway ${gateway}ms · pid ${process.pid}`,
+      flags: ["Ephemeral"] as const,
+    });
   }
 
   @Slash({ name: "enable", description: "Owner only: enable this server for the agent" })

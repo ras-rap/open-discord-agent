@@ -32,11 +32,28 @@ export function createDiscordClient(): Client {
       : interaction.isButton()
         ? `button ${interaction.customId}`
         : `type ${interaction.type}`;
-    logger.info("interaction received", { label, guild: interaction.guildId ?? "dm" });
+    const latency = Date.now() - interaction.createdTimestamp;
+    logger.info("interaction received", { label, guild: interaction.guildId ?? "dm", latencyMs: latency });
+    if (latency > 2500) {
+      logger.warn("interaction arrived late; the gateway session is unhealthy", {
+        label,
+        latencyMs: latency,
+        hint: "Discord expires interactions after 3s. Usual cause: a second process using the same bot token (check `ps aux | grep src/index.ts`), or a paused/throttled host.",
+      });
+    }
     try {
       await client.executeInteraction(interaction);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const expired = typeof error === "object" && error !== null && "code" in error && error.code === 10062;
+      if (expired) {
+        logger.error("interaction expired before we could answer", {
+          label,
+          latencyMs: Date.now() - interaction.createdTimestamp,
+          hint: "Discord drops interactions older than 3s. Look for a second bot process or a paused host, and check clock skew with `bun run doctor`.",
+        });
+        return;
+      }
       logger.error("interaction handler threw", { label, error: message.slice(0, 400) });
       if (!interaction.isRepliable()) return;
       const payload = { content: `⚠️ internal error: ${message.slice(0, 300)}`, flags: ["Ephemeral"] as const };
