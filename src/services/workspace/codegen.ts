@@ -58,33 +58,17 @@ ${tools}
 }
 
 /**
- * The pinned 1.19.5 catalog does not list `crouton-alpha-free` (measured: it offers beam-free,
- * deepseek-v4.1-flash-free, flint-40b-free, glm-5.3-flash-free, navi/nemotron free models instead), so the
- * model is declared explicitly against the Zen responses endpoint. Verified working on 1.19.5: catalog entry
- * appears and prompts stream text back.
+ * Workspace config for the pinned server. Its model catalogue already ships with `opencode-go` (crouton,
+ * beam, ...), so the only thing to wire is the credential: the supervisor injects `OPENCODE_GO_API_KEY`
+ * into each guild's server process, and that key is what selects the Go subscription instead of the free
+ * tier — the absence of which produced "Free usage exceeded, subscribe to Go".
  */
-const CROUTON_MODEL = {
-  'name': 'Crouton Alpha Free',
-  'api': { 'id': 'crouton-alpha-free', 'url': 'https://opencode.ai/inference/openai/v1', 'npm': '@ai-sdk/openai' },
-  'capabilities': {
-    'temperature': true,
-    'reasoning': true,
-    'attachment': true,
-    'toolcall': true,
-    'input': { 'text': true, 'image': true, 'audio': false, 'video': false, 'pdf': true },
-    'output': { 'text': true, 'audio': false, 'image': false, 'video': false, 'pdf': false },
-  },
-  'cost': { 'input': 0, 'output': 0, 'cache': { 'read': 0, 'write': 0 } },
-  'limit': { 'context': 1_048_576, 'output': 270_000 },
-  'status': 'active',
-};
-
 export function renderWorkspaceConfig(): string {
   return `${JSON.stringify(
     {
       '$schema': 'https://opencode.ai/config.json',
       'model': MODELS.primary,
-      'provider': { 'opencode': { 'models': { 'crouton-alpha-free': CROUTON_MODEL } } },
+      'provider': { 'opencode-go': { 'options': { 'apiKey': '{env:OPENCODE_GO_API_KEY}' } } },
       'permission': {
         'edit': {
           '*': 'ask',

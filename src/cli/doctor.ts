@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { assertPinnedBinary } from '@services/agent/binary.ts';
 import { models } from '@services/agent/models.ts';
 import { capabilities } from '@services/bridge/capabilities.ts';
-import { config, paths } from '@services/config.ts';
+import { GO_CHAT_ENDPOINT, config, paths } from '@services/config.ts';
 import { consoleToken, jevMode } from '@services/policy/jev.ts';
 import { shellStatus } from '@services/workspace/shell.ts';
 import { DISCORD_CLIENT_ID, DISCORD_TOKEN } from '@utils/env.ts';
@@ -57,6 +57,34 @@ async function main(): Promise<void> {
   });
 
   checks.push({ 'name': 'bridge', 'severity': 'ok', 'detail': `${config.bridge.host}:${config.bridge.port}` });
+
+  // Go and the free tier are different endpoints; this proves the stored credential is entitled to the models
+  // the bot actually uses, instead of discovering "Free usage exceeded, subscribe to Go" at answer time.
+  if (token)
+    try {
+      const response = await fetch(GO_CHAT_ENDPOINT, {
+        'method': 'POST',
+        'headers': {
+          'authorization': `Bearer ${token}`,
+          'content-type': 'application/json',
+          'x-opencode-session': `ses_doctor_${Date.now()}`,
+        },
+        'body': JSON.stringify({
+          'model': 'crouton-alpha-free',
+          'messages': [{ 'role': 'user', 'content': 'ok' }],
+          'max_tokens': 16,
+        }),
+        'signal': AbortSignal.timeout(20_000),
+      });
+      const body = (await response.text()).replace(/\s+/g, ' ').slice(0, 160);
+      checks.push({
+        'name': 'go subscription',
+        'severity': response.ok ? 'ok' : 'error',
+        'detail': `${response.status} ${body}`,
+      });
+    } catch (error) {
+      checks.push({ 'name': 'go subscription', 'severity': 'error', 'detail': String(error).slice(0, 140) });
+    }
 
   // Discord expires interactions after 3s, so a skewed host clock shows up as evry command failing with 10062.
   try {

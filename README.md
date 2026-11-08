@@ -48,7 +48,7 @@ Then in your server: `/enable` (owner only), and `/ask <prompt>` or mention the 
 | `bun run lint` / `bun run format` | ESLint (with Prettier) / Prettier |
 | `bun test` | unit tests |
 | `bun run commands deploy\|clear\|list` | slash-command registration (`--global`, `--guild`, `--force`) |
-| `bun run commands auth\|doctor\|smoke\|e2e` | agent tooling |
+| `bun run commands auth\|doctor\|smoke\|e2e` | agent tooling (`auth` probes Go first, then Jev, and stores the credential that works) |
 
 ## Project layout
 
@@ -121,6 +121,12 @@ old row for audit but removes it from recall.
 | member | allow | ask | deny | deny |
 | guest / DM | allow | deny | deny | deny |
 
+Models run on the **OpenCode Go** subscription: provider `opencode-go`, base URL `https://opencode.ai/inference/go`,
+authenticated with a Console API key (`oc_sk_...`) that the supervisor injects as `OPENCODE_GO_API_KEY`. Go is a
+different endpoint from the free tier — a keyless/free call answers "Free usage exceeded, subscribe to Go", which is
+what `bun run doctor` now checks explicitly (`go subscription`). Free-tier models only work inside OpenCode's own
+free path, so the provider id and key are what select your subscription.
+
 `JEV_MODE=shadow` (default) logs Jev's reading of every non-read call while the tier table still decides;
 `enforce` lets Jev auto-allow high-confidence low-risk calls and deny anything it rates catastrophic or
 unlikely to be approved. Without a credential the gate degrades to "ask a human", never to allow.
@@ -163,6 +169,7 @@ invalidates the first gateway session, after which interactions arrive late and 
 | `server reported version X, expected 1.19.5` | a different binary is being picked up → `bun run doctor`, check `OPENCODE_BIN` |
 | member list is empty | `GuildMembers` intent not enabled in the Discord dev portal |
 | shell refuses with "docker is not available" | start Docker or set `shell.mode: "host"` for that guild |
+| `Free usage exceeded, subscribe to Go` | the model call used the free tier: run `bun run auth` so a Go-entitled key is stored, then `bun run doctor` (expect `✅ go subscription 200`) |
 | `Unknown interaction` (10062), or commands answer "The application did not respond" | the gateway delivered the interaction after Discord's 3s window — usually a second process on the same token (the lock file blocks that) or a paused host; `/ping` reports interaction latency, gateway ping and pid |
 | approvals never appear | check `/status` → `policy`; the event name is `permission.asked` (not `permission.updated`) |
 | commands appear twice | deploy once per scope: `bun run commands deploy --guild` clears the global set, `--global` clears the guild copy |

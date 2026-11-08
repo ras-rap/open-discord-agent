@@ -45,11 +45,18 @@ function readGuilds(): z.infer<typeof GuildsFile> {
   return parsed.data;
 }
 
+/**
+ * OpenCode Go serves its models from https://opencode.ai/inference/go — a different base URL from the free
+ * tier, which is what "Free usage exceeded, subscribe to Go" means. Provider ids must be opencode-go/*.
+ */
 export const MODELS = {
-  'primary': 'opencode/crouton-alpha-free',
-  'fast': 'opencode/beam-free',
+  'primary': 'opencode-go/crouton-alpha-free',
+  'fast': 'opencode-go/beam-free',
   'jev': 'jev-1.13-free',
 } as const;
+
+/** Go is served separately from pay-as-you-go and the free tier; this is the endpoint the doctor probes. */
+export const GO_CHAT_ENDPOINT = 'https://opencode.ai/inference/go/openai/v1/chat/completions';
 
 export const config = {
   'bridge': { 'host': '127.0.0.1', 'port': BRIDGE_PORT },

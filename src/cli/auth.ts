@@ -7,6 +7,7 @@ import { log } from '@utils/logger.ts';
 
 const logger = log('auth');
 const JEV_ENDPOINT = 'https://opencode.ai/inference/systemone/v1/systemone';
+const GO_ENDPOINT = 'https://opencode.ai/inference/go/openai/v1/chat/completions';
 
 type ExportedValue = {
   type?: string;
@@ -82,6 +83,33 @@ function candidatesFrom(entries: ExportedEntry[]): Candidate[] {
   return candidates.sort((left, right) => rank(left) - rank(right));
 }
 
+/** The models are served by Go, so a credential that Go rejects is useless no matter what Jev thinks of it. */
+async function probeGo(candidate: Candidate): Promise<{ ok: boolean; status: number; detail: string }> {
+  try {
+    const response = await fetch(GO_ENDPOINT, {
+      'method': 'POST',
+      'headers': {
+        'authorization': `Bearer ${candidate.token}`,
+        'content-type': 'application/json',
+        'x-opencode-session': `ses_auth_${Date.now()}`,
+      },
+      'body': JSON.stringify({
+        'model': 'crouton-alpha-free',
+        'messages': [{ 'role': 'user', 'content': 'ok' }],
+        'max_tokens': 16,
+      }),
+      'signal': AbortSignal.timeout(20_000),
+    });
+    return {
+      'ok': response.ok,
+      'status': response.status,
+      'detail': (await response.text()).replace(/\s+/g, ' ').slice(0, 200),
+    };
+  } catch (error) {
+    return { 'ok': false, 'status': 0, 'detail': String(error).slice(0, 200) };
+  }
+}
+
 /** A credential is only useful if the Jev endpoint accepts it, so each one is tried before being stored. */
 async function probe(candidate: Candidate): Promise<{ ok: boolean; status: number; detail: string }> {
   try {
@@ -134,12 +162,20 @@ async function main(): Promise<void> {
   });
 
   for (const candidate of candidates) {
-    const result = await probe(candidate);
-    logger.info(`${result.ok ? '✅' : '❌'} ${candidate.integration} (${candidate.kind})`, {
-      'status': result.status,
-      'detail': result.detail,
+    const go = await probeGo(candidate);
+    logger.info(`${go.ok ? '✅' : '❌'} ${candidate.integration} (${candidate.kind}) — go models`, {
+      'status': go.status,
+      'detail': go.detail,
     });
-    if (!result.ok) continue;
+    if (!go.ok) continue;
+
+    const jev = await probe(candidate);
+    if (jev.ok) logger.info(`✅ ${candidate.integration} — jev`, { 'status': jev.status });
+    else
+      logger.warn('credential works for models but not for jev; the safety gate will ask a human instead', {
+        'status': jev.status,
+      });
+
     writeFileSync(
       paths.token,
       `${JSON.stringify(

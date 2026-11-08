@@ -190,7 +190,7 @@ prompt/model switch is validated against it; anything else throws.
 | Role                                                   | Model                         | Notes                                                                                                   |
 | ------------------------------------------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
 | Primary agent (chat, code, tool use)                   | `opencode/crouton-alpha-free` | 1M context; **not in the pinned catalog**, so it is declared explicitly in each workspace config (§0.1) |
-| Fast/secondary (title gen, summaries, vision-ish jobs) | `opencode/beam-free`          | used for reflection and consolidation to keep the big model free of bulk text                           |
+| Fast/secondary (title gen, summaries, vision-ish jobs) | `opencode-go/beam-free`          | used for reflection and consolidation to keep the big model free of bulk text                           |
 | Typed decisions (safety, routing, eval judging)        | `jev-1.13-free`               | Zen systemone endpoint; returns labels + probabilities, never text                                      |
 
 ### 3.3 Jev access

@@ -35,8 +35,8 @@ describe('session policy', () => {
 
 describe('model allowlist', () => {
   test('splits provider and model for allowed ids', () => {
-    expect(modelRef('opencode/crouton-alpha-free')).toEqual({
-      'providerID': 'opencode',
+    expect(modelRef('opencode-go/crouton-alpha-free')).toEqual({
+      'providerID': 'opencode-go',
       'modelID': 'crouton-alpha-free',
     });
   });

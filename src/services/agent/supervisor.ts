@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import { config, paths } from '@services/config.ts';
 import { workspaces } from '@services/database/sqlite.ts';
+import { consoleToken } from '@services/policy/jev.ts';
 import { provisionWorkspace } from '@services/workspace/provision.ts';
 import { log } from '@utils/logger.ts';
 
@@ -78,6 +79,7 @@ export class Supervisor {
         'BRIDGE_URL': `http://${config.bridge.host}:${config.bridge.port}/rpc`,
         'BRIDGE_TOKEN': workspace.bridgeToken,
         'BRIDGE_GUILD': guildId,
+        'OPENCODE_GO_API_KEY': consoleToken() ?? '',
       },
     });
 
