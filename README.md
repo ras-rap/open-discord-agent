@@ -93,9 +93,16 @@ Mentioning the bot or replying to one of its messages also starts a task.
 
 ## Tools the agent has
 
-`guild_info`, `channels_list`, `channel_info`, `roles_list`, `member_list`, `member_info`, `messages_fetch`,
-`message_send`, `channel_create`, `thread_create`, `message_delete`, `role_assign`, `member_timeout`, and
-`bash` (shadowed builtin → sandboxed shell). Risk classes: read → reversible → destructive → admin.
+26 capabilities, all authorised against the requester's rank before they run:
+
+| Risk | Tools |
+| --- | --- |
+| read | `guild_info`, `channels_list`, `channel_info`, `roles_list`, `member_list`, `member_info`, `messages_fetch` |
+| reversible | `channel_create`, `channel_update` (name/topic/slowmode/nsfw), `channel_move` (category/position), `thread_create`, `thread_update` (archive/lock/rename), `message_send`, `message_pin`, `role_create`, `role_update`, `role_assign`, `invite_create` |
+| destructive | `channel_delete`, `permission_set` (allow/deny/clear overwrites), `role_delete`, `message_delete`, `member_timeout`, `member_kick`, `member_ban`, `bash` |
+
+Permission names are validated (`allow: ["ViewChannel"], deny: ["SendMessages"]`), colours must be `#rrggbb`, and
+`bash` is the shadowed builtin that runs through the sandbox.
 
 ## Memory
 

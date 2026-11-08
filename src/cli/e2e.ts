@@ -2,6 +2,7 @@ import { isDelta, isToolPart, type AgentEvent } from '@services/agent/events.ts'
 import { models } from '@services/agent/models.ts';
 import { Runtime } from '@services/agent/runtime.ts';
 import { Supervisor } from '@services/agent/supervisor.ts';
+import { capabilityByName } from '@services/bridge/lookup.ts';
 import { startBridge } from '@services/bridge/server.ts';
 import { config } from '@services/config.ts';
 import { audit, sessions } from '@services/database/sqlite.ts';
@@ -95,6 +96,46 @@ async function main(): Promise<void> {
 
   const passed = Boolean(bridgeCall) && auditRow?.verdict === 'allow' && /total=\d+/.test(text);
   logger.info(passed ? 'e2e PASSED' : 'e2e FAILED', { 'deltas': events.filter(isDelta).length });
+
+  // `--write` exercises the structural capabilities against this guild: create, lock down, retune, delete.
+  if (process.argv.includes('--write')) {
+    const ctx = { client, guild, 'actorId': OWNER_ID, 'channelId': channel.id };
+    const name = `oda-e2e-${Date.now().toString(36)}`;
+    let created: string | undefined;
+    try {
+      const createOut = await capabilityByName('channel_create').run(ctx, {
+        name,
+        'type': 'text',
+        'topic': 'temporary e2e channel',
+      });
+      created = /(\d{17,})/.exec(createOut)?.[1];
+      logger.info('write create', { 'out': createOut });
+      logger.info('write permission_set', {
+        'out': await capabilityByName('permission_set').run(ctx, {
+          'channel_id': created,
+          'target_id': guild.id,
+          'deny': ['SendMessages'],
+        }),
+      });
+      logger.info('write channel_update', {
+        'out': await capabilityByName('channel_update').run(ctx, {
+          'channel_id': created,
+          'name': `${name}-renamed`,
+          'slowmode': 5,
+        }),
+      });
+      logger.info('write channel_move', {
+        'out': await capabilityByName('channel_move').run(ctx, { 'channel_id': created, 'position': 0 }),
+      });
+    } catch (error) {
+      logger.error('write probe failed', { 'error': error instanceof Error ? error.message : String(error) });
+    } finally {
+      if (created)
+        logger.info('write channel_delete', {
+          'out': await capabilityByName('channel_delete').run(ctx, { 'channel_id': created }),
+        });
+    }
+  }
 
   controller.abort();
   bridge.stop(true);
