@@ -1,8 +1,9 @@
 # open-discord-agent
 
 A Discord-native agent that answers in chat **and acts** — creates channels, reads the member list, manages
-roles, writes code — on an opencode backend, restricted to `crouton-alpha-free`, `beam-free`, and
-`jev-1.13-free`.
+roles, writes code — on an opencode backend. Any model from any provider it is given a credential for: the
+OpenCode Go subscription by default, or OpenAI, Anthropic, Gemini, OpenRouter, a local Ollama/vLLM endpoint, or
+anything else that speaks the OpenAI API.
 
 Built on the [`discord-bot-template`](https://github.com/ras-rap/discord-bot-template/tree/rewrite) conventions:
 discordx decorators discovered by `@discordx/importer`, reusable guards, pino logging, a command-registration
@@ -10,33 +11,115 @@ CLI, ESLint + Prettier, and Bun as the runtime.
 
 Design and the measurements behind it: [`PLAN.md`](./PLAN.md).
 
-**Status:** chat/streaming, the 14 Discord tools, tier policy + Jev shadow gate, approval cards, and memory v1
-are implemented and exercised (`bun test`, `bun run smoke`, `bun run e2e` against the live gateway). The
-evolution loop (self-editing skills with A/B evals) and cross-day recall verification remain; `PLAN.md` §8
-tracks them.
+**Status:** chat/streaming, the 26 Discord tools, tier policy + Jev shadow gate, approval cards, memory v1,
+per-guild model selection and the learning loop with its A/B eval gate are implemented and exercised
+(`bun test`, `bun run smoke`, `bun run e2e` against the live gateway). Cross-day recall verification remains;
+`PLAN.md` §8 tracks it.
 
 ## Requirements
 
 | Need | Why |
 | --- | --- |
 | Bun ≥ 1.1 | runtime (`bun:sqlite`, `Bun.spawn`, `Bun.serve`) |
+| A Discord bot token | Dev Portal → your app → Bot → Reset Token |
+| `GuildMembers` + `MessageContent` intents | member listing, and reading what a mention actually says |
+| One model provider | default is the OpenCode Go subscription (`bun run auth`); a plain API key works too |
 | Docker daemon | default shell sandbox; `shell.mode: "host"` opts out per guild |
-| An OpenCode login on the machine | `bun run auth` stores the credential Jev accepts |
-| Discord bot with `GuildMembers` + `MessageContent` intents | member listing and message text |
 
-## Setup
+## Quick start
 
 ```bash
 bun install
-cp .env.example .env                 # DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_DEVELOPMENT_GUILD_ID, OWNER_ID
-bun run commands deploy              # publish slash commands (guild scope in development)
-bun run doctor                       # preflight: binary, models, token, docker, clock skew, capabilities
-bun run auth                         # probe OpenCode credentials, store the one Jev accepts
-bun run smoke                        # offline end-to-end: server, prompt, stream, approval, jev
-bun run start                        # run the bot
+bun run setup          # validates the token, picks a provider, writes .env, publishes the commands
+bun run auth           # only for the default OpenCode Go models: stores the credential Go accepts
+bun run doctor         # preflight: binary, token, providers, role models, docker, clock skew
+bun run start          # run the bot
 ```
 
-Then in your server: `/enable` (owner only), and `/ask <prompt>` or mention the bot.
+Then in your server: `/enable` (owner only), and `/ask <prompt>` or mention the bot. `/help` describes itself.
+
+`bun run setup` is a conversation, not a config file: it checks the token against Discord, warns when the
+privileged intents are still off, fills in the application id and your owner id automatically, writes `.env`
+(mode `0600`) without touching anything else already in it, and offers to publish the slash commands.
+
+### Manual setup
+
+If you would rather edit files:
+
+```bash
+cp .env.example .env    # DISCORD_TOKEN, DISCORD_CLIENT_ID, OWNER_ID, DISCORD_DEVELOPMENT_GUILD_ID
+bun run commands deploy # guild scope in development, global in production
+bun run doctor
+bun run smoke           # offline end-to-end: server, prompt, stream, approval, question, jev
+bun run start
+```
+
+## Models and providers
+
+The bot asks for **roles**, never for a model name:
+
+| Role | Env | Default | Used for |
+| --- | --- | --- | --- |
+| primary | `MODEL_PRIMARY` | `opencode-go/crouton-alpha-free` | chat, code, tool use |
+| fast | `MODEL_FAST` | `opencode-go/beam-free` | reflection, memory extraction, consolidation |
+| jev | `MODEL_JEV` | `jev-1.13-free` | typed safety decisions (called directly, so no `provider/` prefix) |
+
+`/model current` shows what a server is running, `/model list` shows everything the guild's agent server can
+actually run, and `/model set` switches one guild (admins). The guild's server restarts on the next prompt so
+the new default is loaded; the session and its memory survive. The override lands in `config/guilds.json`:
+
+```jsonc
+{ "123456789012345678": { "enabled": true, "model": { "primary": "opencode-go/gpt-5.6-luna" } } }
+```
+
+### Catalogue providers
+
+These are known to the pinned server; a credential in `.env` is all it takes. The variable names are the ones
+the server itself reads, so a key stored under another name is ignored.
+
+| Provider id | Credential | Example model |
+| --- | --- | --- |
+| `opencode-go` | `bun run auth` (or `OPENCODE_GO_API_KEY`) | `opencode-go/gpt-5.6-luna` |
+| `opencode` | keyless free tier | `opencode/beam-free` |
+| `openai` | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet-4-5` |
+| `google` | `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-2.5-pro` |
+| `openrouter` | `OPENROUTER_API_KEY` | `openrouter/anthropic/claude-sonnet-4.5` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat` |
+| `groq` | `GROQ_API_KEY` | — |
+| `mistral` | `MISTRAL_API_KEY` | — |
+| `xai` | `XAI_API_KEY` | — |
+| `cerebras` | `CEREBRAS_API_KEY` | — |
+| `togetherai` | `TOGETHER_API_KEY` | — |
+
+Provider ids never contain a slash, model ids may (`openrouter/anthropic/claude-sonnet-4.5`), and the resolver
+matches the longest known provider id — a typo like `opengai/gpt-5` fails at `/model set` and in `doctor`
+instead of at answer time. `MODEL_ALLOWLIST` pins the whole deployment to an exact comma-separated list when
+you want the old hard allowlist back.
+
+### Local runtimes and private gateways
+
+Anything that speaks the OpenAI API but is not in the catalogue is declared in `config/providers.json`
+(copy [`config/providers.example.json`](./config/providers.example.json) — it ships Ollama, vLLM and LM Studio
+entries). Keys are *named*, never inlined:
+
+```jsonc
+{
+  "ollama": {
+    "label": "Ollama (local)",
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "models": {
+      "qwen3-coder:30b": { "name": "Qwen3 Coder 30B", "toolCall": true, "contextLimit": 262144 }
+    }
+  }
+}
+```
+
+`apiKeyEnv` names the variable holding the key (omit it for a keyless local runtime), `npm` defaults to
+`@ai-sdk/openai-compatible`, and `toolCall`/`reasoning`/`attachment`/`contextLimit`/`outputLimit` describe the
+model so `/model list` and the tool loop behave. Workspace configs reference credentials as `{env:NAME}`, so no
+secret is ever written into a workspace repository. `bun run setup` asks the endpoint for `/v1/models` and
+writes the entry for you.
 
 ## Scripts
 
@@ -44,6 +127,7 @@ Then in your server: `/enable` (owner only), and `/ask <prompt>` or mention the 
 | --- | --- |
 | `bun dev` | watch mode |
 | `bun start` | run once |
+| `bun run setup` | interactive first-run: token check, provider + model choice, `.env`, command deploy |
 | `bun run typecheck` | `tsc --noEmit` |
 | `bun run lint` / `bun run format` | ESLint (with Prettier) / Prettier |
 | `bun test` | unit tests |
@@ -58,14 +142,14 @@ Fixtures live in `config/fixtures/*.json` and are loaded by `/eval` and the prom
 src/
   main.ts                  entry: env check, instance lock, importer, client.build(), deploy, login
   client.ts                discordx Client (intents/partials from utils/constants)
-  commands/                slash commands and component interactables (agent, admin, ping, approvals)
+  commands/                slash commands and component interactables (agent, model, help, admin, approvals)
   events/                  ready, mention prompts, interaction safety net
-  guards/                  cooldown, guildOnly, ownerOnly, guildEnabled
-  cli/                     `bun run commands …` dispatcher + deploy/clear/list, auth/doctor/smoke/e2e
+  guards/                  cooldown, guildOnly, ownerOnly, guildEnabled, managerOnly
+  cli/                     `bun run commands …` dispatcher + setup/deploy/clear/list, auth/doctor/smoke/e2e
   services/
-    config.ts              guilds.json, paths, model allowlist, shell defaults
-    agent/                 opencode binary, client, event adapter, supervisor, prompt runtime
-    bridge/                14 Discord capabilities + loopback RPC server
+    config.ts              guilds.json, paths, role models, shell defaults
+    agent/                 binary, client, provider registry, model resolver, error diagnosis, supervisor, runtime
+    bridge/                26 Discord capabilities + loopback RPC server
     policy/                tier ceilings, Jev client (shadow/enforce)
     memory/                FTS5 store, retrieval injection, reflector
     workspace/             provisioning, generated tool file, docker/host shell
@@ -81,9 +165,13 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 | Command | Effect |
 | --- | --- |
 | `/ask <prompt>` | run a task in this channel (streamed) |
+| `/help` | what the agent can do, grouped by tool risk |
+| `/model current` | roles, their source, and which providers are ready |
+| `/model list [filter]` | every model this server can run |
+| `/model set model:<id> [role]` · `/model reset [role]` | switch or drop a guild's model (admin) |
 | `/new` | fresh opencode session for this channel |
 | `/abort` | interrupt the running task |
-| `/status` | servers, sessions, approvals, sandbox, policy, gateway, recent decisions |
+| `/status` | servers, sessions, approvals, sandbox, policy, models, gateway, recent decisions |
 | `/audit` | last 10 policy decisions in this server |
 | `/remember <text>` | store a durable fact (rewrites the workspace `MEMORY.md`) |
 | `/memory [query] [forget]` | search, show stats, or delete a memory by id |
@@ -115,7 +203,7 @@ Permission names are validated (`allow: ["ViewChannel"], deny: ["SendMessages"]`
 
 Three write paths feed one SQLite store (`memory` + `memory_fts`):
 
-- **reflection** — after a turn that used tools or asked for something durable, `beam-free` re-reads the turn
+- **reflection** — after a turn that used tools or asked for something durable, the `fast` role re-reads the turn
   and emits typed JSON (`facts`, `preferences`, `lessons`); entries that look like credentials are dropped
   before they reach the store.
 - **explicit** — `/remember <text>`.
@@ -133,7 +221,7 @@ Three signals feed one loop, and every change is gated:
 1. **outcomes** — tool success/failure, permission denials, corrections (all already recorded).
 2. **reactions** — 👍/👎/✅/❌ on the bot's own messages are stored (`feedback`), de-duplicated per user/message,
    and folded into the next reflection pass so a thumbs-down actually teaches something.
-3. **lessons** — the `beam-free` reflector turns turns into `facts`/`preferences`/`lessons`.
+3. **lessons** — the `fast` role turns turns into `facts`/`preferences`/`lessons`.
 
 `/learn` ranks those lessons and renders a diff. On approval the change goes through an **A/B gate** before it is
 allowed to stay:
@@ -160,11 +248,12 @@ and a database snapshot every 24 h.
 | member | allow | ask | deny | deny |
 | guest / DM | allow | deny | deny | deny |
 
-Models run on the **OpenCode Go** subscription: provider `opencode-go`, base URL `https://opencode.ai/inference/go`,
-authenticated with a Console API key (`oc_sk_...`) that the supervisor injects as `OPENCODE_GO_API_KEY`. Go is a
-different endpoint from the free tier — a keyless/free call answers "Free usage exceeded, subscribe to Go", which is
-what `bun run doctor` now checks explicitly (`go subscription`). Free-tier models only work inside OpenCode's own
-free path, so the provider id and key are what select your subscription.
+Models run wherever `.env` points them. The default is the **OpenCode Go** subscription: provider
+`opencode-go`, base URL `https://opencode.ai/inference/go`, authenticated with a Console API key (`oc_sk_...`)
+that the supervisor injects as `OPENCODE_GO_API_KEY`. Go is a different endpoint from the free tier — a
+keyless/free call answers "Free usage exceeded, subscribe to Go", which is what `bun run doctor` checks
+explicitly (`go subscription`). When a role names another provider, `doctor` skips that check instead of
+reporting a failure.
 
 `JEV_MODE=shadow` (default) logs Jev's reading of every non-read call while the tier table still decides;
 `enforce` lets Jev auto-allow high-confidence low-risk calls and deny anything it rates catastrophic or
@@ -177,7 +266,8 @@ unlikely to be approved. Without a credential the gate degrades to "ask a human"
   "123456789012345678": {
     "enabled": true,
     "shell": { "mode": "docker", "image": "debian:bookworm-slim", "fallback": "error" },
-    "roles": { "admin": ["111..."], "trusted": ["222..."] }
+    "roles": { "admin": ["111..."], "trusted": ["222..."] },
+    "model": { "primary": "opencode-go/gpt-5.6-luna" }
   }
 }
 ```
@@ -209,16 +299,26 @@ The bot takes a lock at `.data/bot.lock` and refuses to start while another proc
 invalidates the first gateway session, after which interactions arrive late and every reply fails with
 `Unknown interaction` (10062).
 
+Failures are classified before they reach the channel: a provider error is replaced by a one-line diagnosis and
+the command that fixes it (`src/services/agent/errors.ts`), and the cause is logged as a stable code
+(`go-subscription`, `auth`, `model-unavailable`, `rate-limit`, `context`, `network`, `tool-support`,
+`interaction-expired`).
+
 | Symptom | Cause |
 | --- | --- |
 | `opencode binary not found` | postinstall skipped → `bun pm trust opencode-ai && bun install` |
 | `server reported version X, expected 1.19.5` | a different binary is being picked up → `bun run doctor`, check `OPENCODE_BIN` |
-| member list is empty | `GuildMembers` intent not enabled in the Discord dev portal |
-| a tool sits at "write · pending" | a `write`/`edit` outside `repo/` is waiting for an approval card — answer it, or move the work under `repo/` where edits are click-free; the streaming message now says `🔒 waiting for approval` when this happens |
+| member list is empty | `GuildMembers` intent not enabled in the Discord portal (`setup` warns about this) |
+| a tool sits at "write · pending" | a `write`/`edit` outside `repo/` is waiting for an approval card — answer it, or move the work under `repo/` where edits are click-free; the streaming message says `🔒 waiting for approval` |
 | shell refuses with "docker is not available" | start Docker or set `shell.mode: "host"` for that guild |
-| `Free usage exceeded, subscribe to Go` | the model call used the free tier: run `bun run auth` so a Go-entitled key is stored, then `bun run doctor` (expect `✅ go subscription 200`) |
+| "The model call fell through to the free tier" | the model call used the free tier: run `bun run auth` so a Go-entitled key is stored, then `bun run doctor` (expect `✅ go subscription 200`) |
+| "The provider rejected the credential" | the key for the provider in `/model current` is wrong, revoked, or stored under another name — check `.env`, then `bun run doctor` |
+| "That model is not available from this provider" | `/model list` for what the server offers, then `/model set` |
+| `unknown provider "x"` | the provider has no credential and is not declared — add the key to `.env` or an entry to `config/providers.json` |
+| a local model answers but never calls a tool | the runtime/model does not do function calling — mark it `"toolCall": true` only once it does, or pick another model |
 | `Unknown interaction` (10062), or commands answer "The application did not respond" | the gateway delivered the interaction after Discord's 3s window — usually a second process on the same token (the lock file blocks that) or a paused host; `/ping` reports interaction latency, gateway ping and pid |
 | the agent says "question · running" and nothing arrives | it used opencode's `question` tool; the card should be posted in the channel (answer buttons or a select). If it is missing, check the bot log for `could not post question card` |
 | approvals never appear | check `/status` → `policy`; the event name is `permission.asked` (not `permission.updated`) |
 | commands appear twice | deploy once per scope: `bun run commands deploy --guild` clears the global set, `--global` clears the guild copy |
+| slash commands lost their arguments | every `deploy`/`list` run now calls `MetadataStorage.build()` first; a payload published by an older build has to be redeployed (options and slash groups are attached there) |
 | `/enable` says owner only | `OWNER_ID` in `.env` must be your Discord user id |

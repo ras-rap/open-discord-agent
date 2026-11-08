@@ -4,11 +4,12 @@ import type { DeployScope } from './commands/registry.ts';
 
 const logger = log('cli');
 
-const SUBCOMMANDS = ['deploy', 'clear', 'list', 'auth', 'doctor', 'smoke', 'e2e', 'backup'] as const;
+const SUBCOMMANDS = ['setup', 'deploy', 'clear', 'list', 'auth', 'doctor', 'smoke', 'e2e', 'backup'] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const printUsage = () => {
   logger.info('Usage: bun run commands <subcommand> [--global|--guild] [--force]');
+  logger.info('  setup    interactive: validate the token, choose a provider, write .env, deploy commands');
   logger.info('  deploy   publish slash commands (default: guild in development, global in production)');
   logger.info('  clear    remove registered commands from the resolved scope');
   logger.info('  list     diff local commands against the registered ones');
@@ -40,6 +41,9 @@ const force = hasFlag('--force');
 
 const run = async (name: Subcommand) => {
   switch (name) {
+    case 'setup':
+      await import('./setup.ts');
+      break;
     case 'deploy': {
       const { syncCommands } = await import('./commands/deploy.ts');
       await syncCommands({ scope, force });

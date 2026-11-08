@@ -3,7 +3,7 @@
   "module": "src/main.ts",
   "type": "module",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Discord-native coding agent on the opencode backend",
   "engines": {
     "bun": ">=1.1.0"
@@ -16,6 +16,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "commands": "bun src/cli/index.ts",
+    "setup": "bun src/cli/index.ts setup",
     "auth": "bun src/cli/index.ts auth",
     "doctor": "bun src/cli/index.ts doctor",
     "smoke": "bun src/cli/index.ts smoke",
@@ -45,5 +46,7 @@
     "prettier": "^3.6.2",
     "typescript": "^5.9.2"
   },
-  "trustedDependencies": ["opencode-ai"]
+  "trustedDependencies": [
+    "opencode-ai"
+  ]
 }

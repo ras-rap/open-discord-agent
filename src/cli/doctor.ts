@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 
 import { assertPinnedBinary } from '@services/agent/binary.ts';
-import { models } from '@services/agent/models.ts';
+import { effectiveModel, knownProviderIds, modelAllowlist, modelRef } from '@services/agent/models.ts';
+import { providerSummary, providersFilePath } from '@services/agent/providers.ts';
 import { capabilities } from '@services/bridge/capabilities.ts';
 import { GO_CHAT_ENDPOINT, config, paths } from '@services/config.ts';
 import { consoleToken, jevMode } from '@services/policy/jev.ts';
@@ -12,6 +13,67 @@ import { log } from '@utils/logger.ts';
 const logger = log('doctor');
 
 type Check = { name: string; severity: 'ok' | 'warn' | 'error'; detail: string };
+
+/**
+ * A syntactically plausible token is not a working one: Discord answers 401 for revoked/rotated tokens, which
+ * otherwise surfaces as "started fine, never answers".
+ */
+async function discordTokenCheck(): Promise<Check> {
+  try {
+    const response = await fetch('https://discord.com/api/v10/users/@me', {
+      'headers': { 'authorization': `Bot ${DISCORD_TOKEN}` },
+      'signal': AbortSignal.timeout(8000),
+    });
+    if (!response.ok)
+      return {
+        'name': 'discord token',
+        'severity': 'error',
+        'detail': `HTTP ${response.status} — copy a fresh token into .env`,
+      };
+    const bot = (await response.json()) as { username?: string; id?: string };
+    return {
+      'name': 'discord token',
+      'severity': 'ok',
+      'detail': `bot ${bot.username ?? '?'} (${bot.id ?? DISCORD_CLIENT_ID})`,
+    };
+  } catch (error) {
+    return {
+      'name': 'discord token',
+      'severity': 'warn',
+      'detail': `could not reach discord.com: ${String(error).slice(0, 120)}`,
+    };
+  }
+}
+
+/** One row per provider the deployment resolves, so a missing credential is named instead of inferred later. */
+function providerChecks(): Check[] {
+  return providerSummary()
+    .filter(provider => provider.source === 'config' || provider.ready || provider.id === 'opencode-go')
+    .map(provider => ({
+      'name': `provider ${provider.id}`,
+      'severity': provider.ready ? 'ok' : 'warn',
+      'detail': provider.ready
+        ? `${provider.label}${provider.models.length > 0 ? ` · ${provider.models.length} declared model(s)` : ' · catalogue models'}`
+        : `no credential — set ${provider.keyEnv ?? 'its key'}`,
+    }));
+}
+
+/** Role models are validated exactly as a prompt would validate them, so a typo fails here and not at answer time. */
+function roleChecks(): Check[] {
+  return (['primary', 'fast'] as const).map(role => {
+    const resolved = effectiveModel(role);
+    try {
+      modelRef(resolved.id);
+      return { 'name': `model ${role}`, 'severity': 'ok' as const, 'detail': `${resolved.id} (${resolved.source})` };
+    } catch (error) {
+      return {
+        'name': `model ${role}`,
+        'severity': 'error' as const,
+        'detail': error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+}
 
 /**
  * Pre-flight report. Warnings (e.g. no docker daemon on a dev machine) never block boot: the shell runner
@@ -31,15 +93,21 @@ async function main(): Promise<void> {
     });
   }
 
-  checks.push({
-    'name': 'discord token',
-    'severity': DISCORD_TOKEN.length > 40 ? 'ok' : 'error',
-    'detail': `bot ${DISCORD_CLIENT_ID}`,
-  });
+  checks.push(await discordTokenCheck());
+  checks.push(...providerChecks());
+  checks.push(...roleChecks());
   checks.push({
     'name': 'model allowlist',
     'severity': 'ok',
-    'detail': [models.primary(), models.fast()].map(models.label).join(', ') + `, jev ${models.jev}`,
+    'detail':
+      modelAllowlist().length > 0
+        ? `pinned to ${modelAllowlist().length} model(s) by MODEL_ALLOWLIST`
+        : `open — any model from ${knownProviderIds().length} known providers (set MODEL_ALLOWLIST to pin)`,
+  });
+  checks.push({
+    'name': 'extra providers',
+    'severity': 'ok',
+    'detail': existsSync(providersFilePath()) ? providersFilePath() : 'none (config/providers.json absent)',
   });
   const token = consoleToken();
   checks.push({
@@ -59,8 +127,10 @@ async function main(): Promise<void> {
   checks.push({ 'name': 'bridge', 'severity': 'ok', 'detail': `${config.bridge.host}:${config.bridge.port}` });
 
   // Go and the free tier are different endpoints; this proves the stored credential is entitled to the models
-  // the bot actually uses, instead of discovering "Free usage exceeded, subscribe to Go" at answer time.
-  if (token)
+  // the bot actually uses, instead of discovering "Free usage exceeded, subscribe to Go" at answer time. It is
+  // only meaningful when a role actually runs on Go, so another provider's deployment never sees a red line.
+  const usesGo = [effectiveModel('primary').id, effectiveModel('fast').id].some(id => id.startsWith('opencode-go/'));
+  if (token && usesGo)
     try {
       const response = await fetch(GO_CHAT_ENDPOINT, {
         'method': 'POST',
