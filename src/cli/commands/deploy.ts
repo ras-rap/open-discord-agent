@@ -2,17 +2,14 @@ import { importx } from '@discordx/importer';
 import { DISCORD_CLIENT_ID, DISCORD_TOKEN, IS_PRODUCTION, developmentGuildId } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 import { REST, Routes } from 'discord.js';
-import { Client, MetadataStorage } from 'discordx';
+import { Client } from 'discordx';
+
+import { buildCommandMetadata } from './registry.ts';
 
 import type { DeployScope } from './registry.ts';
 import type { ApplicationCommandDataResolvable } from 'discord.js';
 
 const logger = log('cli/deploy');
-
-await importx(`${import.meta.dirname}/../../{commands,guards}/**/*.ts`);
-// Decorated options and slash groups are attached by `build()`, not by importing the modules: without it the
-// payload would publish `/ask` with no `prompt` argument and `/model current` as a bare top-level command.
-await MetadataStorage.instance.build();
 
 const rest = new REST({ 'version': '10' }).setToken(DISCORD_TOKEN);
 
@@ -32,6 +29,10 @@ const labelFor = (scope: DeployScope) => (scope === 'guild' ? `to guild ${develo
  * entries, so the other scope is cleared — that duplication is what made commands appear twice before.
  */
 export async function syncCommands(flags: DeployFlags = {}): Promise<void> {
+  // Loading the decorations must happen here, not at module scope: `main.ts` imports this module for its
+  // boot-time sync, and module-scope work would run before `events/` is imported.
+  await importx(`${import.meta.dirname}/../../{commands,guards}/**/*.ts`);
+  await buildCommandMetadata();
   const scope = resolveScope(flags.scope);
   const payload = Client.applicationCommandSlashes.map(command =>
     command.toJSON(),
