@@ -164,7 +164,7 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 
 | Command | Effect |
 | --- | --- |
-| `/ask <prompt>` | run a task in this channel (streamed) |
+| `/ask <prompt>` | run a task in this channel — one progress message is edited live, then the answer arrives as a new message that pings you |
 | `/help` | what the agent can do, grouped by tool risk |
 | `/model current` | roles, their source, and which providers are ready |
 | `/model list [filter]` | every model this server can run |
@@ -185,6 +185,19 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 | `/enable` | owner only: allow this server |
 
 Mentioning the bot or replying to one of its messages also starts a task.
+
+### What a turn looks like in the channel
+
+1. one message says `🧠 thinking…` and is edited in place as the answer streams — that is where tool activity
+   shows, so the channel never fills with tool chatter;
+2. when the turn ends that message is **deleted** and the answer is posted as its **own message that pings
+   whoever asked** (long answers continue in follow-up chunks, mention on the first only);
+3. approval cards are removed the moment they are decided, expired, or the turn ends — the record stays in
+   `/audit` instead of in the channel;
+4. a turn is abandoned only after `IDLE_TIMEOUT_MS` (10 min) of **silence** — continuous streaming or tool
+   calls reset that clock, so slow work is never killed. On a timeout the session is aborted, the channel is
+   rebound to a fresh session so the next message works normally, and the partial output is posted with a
+   `⏱️ interrupted` note.
 
 ## Tools the agent has
 
@@ -319,6 +332,8 @@ the command that fixes it (`src/services/agent/errors.ts`), and the cause is log
 | `Unknown interaction` (10062), or commands answer "The application did not respond" | the gateway delivered the interaction after Discord's 3s window — usually a second process on the same token (the lock file blocks that) or a paused host; `/ping` reports interaction latency, gateway ping and pid |
 | the agent says "question · running" and nothing arrives | it used opencode's `question` tool; the card should be posted in the channel (answer buttons or a select). If it is missing, check the bot log for `could not post question card` |
 | approvals never appear | check `/status` → `policy`; the event name is `permission.asked` (not `permission.updated`) |
+| a turn says `⏱️ interrupted after 10 min without output` | the provider stopped emitting events; the session was aborted and a fresh one bound to the channel, so the next message runs normally. Raise `IDLE_TIMEOUT_MS` if your runtime is just slow |
+| an answer arrives but pings nobody | the requester must still be in the channel — the mention is `<@id>` on the first chunk of the answer |
 | commands appear twice | deploy once per scope: `bun run commands deploy --guild` clears the global set, `--global` clears the guild copy |
 | slash commands lost their arguments | every `deploy`/`list` run now calls `MetadataStorage.build()` first; a payload published by an older build has to be redeployed (options and slash groups are attached there) |
 | `/enable` says owner only | `OWNER_ID` in `.env` must be your Discord user id |

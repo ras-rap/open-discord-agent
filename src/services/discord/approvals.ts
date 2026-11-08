@@ -1,6 +1,14 @@
 import { approvals } from '@services/database/sqlite.ts';
 import { log } from '@utils/logger.ts';
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client, type TextChannel } from 'discord.js';
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  type Client,
+  type Message,
+  type TextChannel,
+} from 'discord.js';
 
 const logger = log('approvals');
 const DEFAULT_TTL_MS = 180_000;
@@ -8,7 +16,19 @@ const DEFAULT_TTL_MS = 180_000;
 export type ApprovalKind = 'bridge' | 'permission';
 export type ApprovalOutcome = 'allowed' | 'always' | 'denied' | 'expired';
 
-type Waiter = { resolve: (outcome: ApprovalOutcome) => void; timer: Timer };
+type Waiter = {
+  resolve: (outcome: ApprovalOutcome) => void;
+  timer?: Timer;
+  /** The card itself, so it can be removed when it stops being actionable. */
+  message?: Message;
+};
+
+/** A decided, expired, or abandoned card is noise: the record lives in the `approvals` table and `/audit`. */
+async function dropCard(waiter: Waiter): Promise<void> {
+  const card = waiter.message;
+  waiter.message = undefined;
+  await card?.delete().catch(() => undefined);
+}
 
 /** Ids are random per request, so a Map (not a lookup table) is the right store. */
 const waiters = new Map<string, Waiter>();
@@ -62,24 +82,27 @@ export async function requestApproval(input: ApprovalRequest): Promise<ApprovalO
     new ButtonBuilder().setCustomId(`oda:ap:${id}:deny`).setLabel('Reject').setStyle(ButtonStyle.Danger),
   );
 
-  const timer = setTimeout(() => {
+  const waiter: Waiter = { resolve };
+  waiter.timer = setTimeout(() => {
     if (!waiters.delete(id)) return;
     approvals.decide(id, 'expired', 'system');
     logger.info('approval expired', { id, 'kind': input.kind });
+    void dropCard(waiter);
     resolve('expired');
   }, ttl);
 
-  waiters.set(id, { resolve, timer });
+  waiters.set(id, waiter);
 
   try {
     const channel = await input.client.channels.fetch(input.channelId);
     if (!channel || !channel.isTextBased() || !('send' in channel))
       throw new Error('approval channel is not text based');
     const message = await (channel as TextChannel).send({ 'embeds': [embed], 'components': [row] });
+    waiter.message = message;
     approvals.setMessage(id, message.id);
   } catch (error) {
     logger.warn('could not post approval card; denying', { id, 'error': String(error).slice(0, 200) });
-    clearTimeout(timer);
+    if (waiter.timer) clearTimeout(waiter.timer);
     waiters.delete(id);
     approvals.decide(id, 'expired', 'system');
     resolve('expired');
@@ -93,20 +116,42 @@ export function resolveApproval(id: string, decision: 'allow' | 'always' | 'deny
   const waiter = waiters.get(id);
   if (!waiter) return false;
   waiters.delete(id);
-  clearTimeout(waiter.timer);
+  if (waiter.timer) clearTimeout(waiter.timer);
   const allowed = decision !== 'deny';
   approvals.decide(id, allowed ? 'allowed' : 'denied', approverId);
   waiter.resolve(decision === 'allow' ? 'allowed' : decision === 'always' ? 'always' : 'denied');
   return true;
 }
 
-export function cancelApprovalsForSession(sessionId: string): void {
+/**
+ * Removes every card belonging to a session that has ended. Cards whose waiter is gone (the bot restarted
+ * mid-turn) are deleted from their stored message id, so the channel never keeps dead buttons around.
+ */
+export async function cancelApprovalsForSession(sessionId: string, client?: Client): Promise<void> {
   for (const row of approvals.pendingBySession(sessionId)) {
     approvals.decide(row.id, 'expired', 'session-ended');
     const waiter = waiters.get(row.id);
-    if (!waiter) continue;
-    waiters.delete(row.id);
-    clearTimeout(waiter.timer);
-    waiter.resolve('expired');
+    if (waiter) {
+      waiters.delete(row.id);
+      if (waiter.timer) clearTimeout(waiter.timer);
+      waiter.resolve('expired');
+      await dropCard(waiter);
+      continue;
+    }
+    if (!client || !row.message_id) continue;
+    await dropStoredCard(client, row.chat_key, row.message_id);
+  }
+}
+
+/** `chat_key` is `${guildId}:${channelId}`, which is where the card was posted. */
+async function dropStoredCard(client: Client, chatKey: string, messageId: string): Promise<void> {
+  const channelId = chatKey.slice(chatKey.lastIndexOf(':') + 1);
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased() || !('messages' in channel)) return;
+    const message = await channel.messages.fetch(messageId);
+    await message.delete();
+  } catch (error) {
+    logger.debug('stored approval card could not be removed', { messageId, 'error': String(error).slice(0, 120) });
   }
 }

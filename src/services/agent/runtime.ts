@@ -10,6 +10,7 @@ import { commitWorkspace } from '@services/evolution/skills.ts';
 import { memoryContext, writeDigest } from '@services/memory/inject.ts';
 import { reflectTurn, worthReflecting } from '@services/memory/reflect.ts';
 import { tierOf } from '@services/policy/gate.ts';
+import { optionalEnv } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 
 import { diagnosisCode, failureText } from './errors.ts';
@@ -29,7 +30,16 @@ import type { Supervisor } from './supervisor.ts';
 import type { Client, GuildMember, TextChannel } from 'discord.js';
 
 const logger = log('runtime');
-const IDLE_TIMEOUT_MS = 15 * 60_000;
+/**
+ * Silence, not wall-clock: a long task that keeps streaming deltas or tool parts is never killed, while a
+ * server that has gone quiet is. A fixed whole-turn deadline used to abandon work that was still progressing.
+ * Overridable because a slow local runtime may legitimately need a longer window.
+ */
+const configuredSilence = Number(optionalEnv('IDLE_TIMEOUT_MS') ?? '');
+const IDLE_TIMEOUT_MS = Number.isFinite(configuredSilence) && configuredSilence > 0 ? configuredSilence : 10 * 60_000;
+
+/** Seconds below a minute, minutes above it — "0 min" would be a confusing thing to tell someone. */
+const describeWindow = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)} min`);
 /** `/model list` and autocomplete share one catalogue per guild; a restart of the server invalidates it. */
 const CATALOG_TTL_MS = 60_000;
 
@@ -39,6 +49,9 @@ type Stream = {
   renderer: StreamRenderer;
   resolve: () => void;
   toolCalls: Array<{ tool: string; status?: string; input?: unknown }>;
+  /** Re-armed on every event for this session; fires after `IDLE_TIMEOUT_MS` of silence. */
+  watchdog?: Timer;
+  timedOut: boolean;
 };
 
 export type AskInput = {
@@ -105,7 +118,8 @@ export class Runtime {
     await renderer.start();
 
     const idle = Promise.withResolvers<void>();
-    this.streams.set(sessionId, { renderer, 'resolve': idle.resolve, 'toolCalls': [] });
+    const stream: Stream = { renderer, 'resolve': idle.resolve, 'toolCalls': [], 'timedOut': false };
+    this.streams.set(sessionId, stream);
 
     const rank = ['guest', 'member', 'trusted', 'admin', 'owner'][tierOf(input.guildId, input.member)];
     const prompt =
@@ -114,15 +128,21 @@ export class Runtime {
 
     try {
       await server.opencode.prompt(sessionId, prompt, models.primary(input.guildId));
-      const timeout = setTimeout(() => {
-        logger.warn('prompt timed out', { chatKey, sessionId });
-        idle.resolve();
-      }, IDLE_TIMEOUT_MS);
+      this.watch(sessionId, stream);
       await idle.promise;
-      clearTimeout(timeout);
 
-      const finalText = await server.opencode.lastText(sessionId);
-      await renderer.finish(finalText);
+      if (stream.timedOut) await this.recoverSession(server, chatKey, sessionId);
+      const finalText = await server.opencode.lastText(sessionId).catch(() => '');
+      await renderer.finish(finalText, {
+        'mentionId': input.actorId,
+        ...(stream.timedOut
+          ? {
+              'note':
+                `⏱️ interrupted after ${describeWindow(IDLE_TIMEOUT_MS)} without output. The session was aborted ` +
+                'and the next message starts a fresh one — partial output follows.',
+            }
+          : {}),
+      });
       sessions.touch(chatKey);
       // Snapshot the workspace: code edits need no approval precisely because they are always revertible.
       commitWorkspace(input.guildId, `agent: turn ${chatKey} ${new Date().toISOString()}`);
@@ -142,10 +162,11 @@ export class Runtime {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('prompt failed', { chatKey, 'code': diagnosisCode(message), 'error': message.slice(0, 300) });
-      await renderer.fail(failureText(message));
+      await renderer.fail(failureText(message), { 'mentionId': input.actorId });
     } finally {
+      clearTimeout(stream.watchdog);
       this.streams.delete(sessionId);
-      cancelApprovalsForSession(sessionId);
+      await cancelApprovalsForSession(sessionId, this.client);
       for (const question of pendingQuestionsForSession(sessionId)) {
         logger.warn('cancelling unanswered question at end of turn', { 'requestId': question.requestId });
         cancelQuestion(question.requestId);
@@ -154,9 +175,37 @@ export class Runtime {
     }
   }
 
+  /**
+   * Aborts the wedged turn and rebinds the chat to a fresh session. An interrupted session _sometimes_ answers
+   * again, but not reliably — and a channel whose next prompt produces nothing is exactly the "it completely
+   * stopped" failure. The old transcript stays on disk; memory injection carries durable facts into the new one.
+   */
+  private async recoverSession(
+    server: Awaited<ReturnType<Supervisor['ensure']>>,
+    chatKey: string,
+    sessionId: string,
+  ): Promise<void> {
+    await server.opencode.abort(sessionId).catch(() => undefined);
+    const fresh = await server.opencode.createSession(`${chatKey} (recovered after timeout)`).catch(() => undefined);
+    if (!fresh) return;
+    sessions.rotate(chatKey, fresh);
+    logger.info('session rotated after timeout', { chatKey, 'abandoned': sessionId, 'fresh': fresh });
+  }
+
+  /** Arms (or re-arms) the silence timer: any event for a live stream proves the server is still working. */
+  private watch(sessionId: string, stream: Stream): void {
+    clearTimeout(stream.watchdog);
+    stream.watchdog = setTimeout(() => {
+      logger.warn('prompt went silent; aborting', { sessionId, 'silenceMs': IDLE_TIMEOUT_MS });
+      stream.timedOut = true;
+      stream.resolve();
+    }, IDLE_TIMEOUT_MS);
+  }
+
   handleEvent(guildId: string, event: AgentEvent): void {
     const sessionId = typeof event.properties?.sessionID === 'string' ? event.properties.sessionID : undefined;
     const stream = sessionId ? this.streams.get(sessionId) : undefined;
+    if (sessionId && stream) this.watch(sessionId, stream);
 
     if (stream && isDelta(event) && event.properties.field === 'text') {
       stream.renderer.push(event.properties.delta);

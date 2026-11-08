@@ -173,10 +173,11 @@ sequenceDiagram
   G-->>B: allowed capability set for this turn
   B->>M: retrieve memories (BM25 + recency + importance)
   B->>O: session.prompt({prompt:{text:"<context>…</context>\n"+user, files}})
-  O-->>B: message.part.delta → coalesced edits
+  O-->>B: message.part.delta → coalesced edits of one progress message
   O->>B: permission.asked → embed + buttons → /permission/{id}/reply
   O->>B: tool parts (discord_*) → bridge → gate → docker/discord
-  O-->>B: session.idle → final answer, chunked <2000 chars
+  O-->>B: session.idle → progress message deleted, answer posted as a new message that pings the asker
+  Note over B,O: silence > IDLE_TIMEOUT_MS → abort, chat rebound to a fresh session, partial output reported
   B->>M: reflect (beam-free) → facts/lessons/outcome
 ```
 

@@ -32,11 +32,14 @@ export class ApprovalButton {
     }
     const resolved = resolveApproval(approvalId, decision, interaction.user.id);
     logger.info('approval decided', { approvalId, decision, 'by': interaction.user.id, resolved });
-    await interaction.update({
+    // The card is scratch space: acknowledge the click, then remove it so a finished turn leaves no dead
+    // buttons behind. What was decided stays queryable through `/audit`.
+    await interaction.deferReply({ 'flags': EPHEMERAL });
+    await interaction.message.delete().catch(() => undefined);
+    await interaction.editReply({
       'content': resolved
-        ? `✅ ${decision} by <@${interaction.user.id}>`
-        : 'this request already expired or was decided',
-      'components': [],
+        ? `✅ ${decision} by <@${interaction.user.id}> — card removed, recorded in \`/audit\``
+        : 'this request already expired or was decided — card removed',
     });
   }
 }
