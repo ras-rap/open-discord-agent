@@ -48,7 +48,7 @@ Then in your server: `/enable` (owner only), and `/ask <prompt>` or mention the 
 | `bun run lint` / `bun run format` | ESLint (with Prettier) / Prettier |
 | `bun test` | unit tests |
 | `bun run commands deploy\|clear\|list` | slash-command registration (`--global`, `--guild`, `--force`) |
-| `bun run commands auth\|doctor\|smoke\|e2e` | agent tooling (`auth` probes Go first, then Jev, and stores the credential that works) |
+| `bun run commands auth\|doctor\|smoke\|e2e\|backup` | agent tooling (`auth` probes Go first then Jev; `backup` writes a consistent SQLite snapshot, keeping 14) |
 
 ## Project layout
 
@@ -85,6 +85,8 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 | `/audit` | last 10 policy decisions in this server |
 | `/remember <text>` | store a durable fact (rewrites the workspace `MEMORY.md`) |
 | `/memory [query] [forget]` | search, show stats, or delete a memory by id |
+| `/learn` | compile stored lessons into a `SKILL.md` proposal and review the diff (admin) |
+| `/skills [revert] [name]` | list artifacts, feedback counts, current skill file; restore a version |
 | `/ping` | interaction latency, gateway ping, pid |
 | *(cards)* | the agent's `question` tool and `permission.asked` both arrive as answerable cards — buttons, or a select menu when a question offers more than five options |
 | `/enable` | owner only: allow this server |
@@ -118,6 +120,20 @@ Three write paths feed one SQLite store (`memory` + `memory_fts`):
 Retrieval scores `0.6·BM25 + 0.25·recency + 0.15·importance` under a 1500-char budget and injects a
 `<memory>` block into the user turn. Corrections supersede rather than contradict: `superseded_by` keeps the
 old row for audit but removes it from recall.
+
+## Learning loop
+
+Three signals feed one loop, and every change is gated:
+
+1. **outcomes** — tool success/failure, permission denials, corrections (all already recorded).
+2. **reactions** — 👍/👎/✅/❌ on the bot's own messages are stored (`feedback`), de-duplicated per user/message,
+   and folded into the next reflection pass so a thumbs-down actually teaches something.
+3. **lessons** — the `beam-free` reflector turns turns into `facts`/`preferences`/`lessons`.
+
+`/learn` ranks those lessons and renders a diff. On approval the bot writes
+`.data/workspaces/<guild>/.opencode/skills/learned-playbook/SKILL.md`, records the version (content + sha256) in
+`artifacts`, and **commits the workspace repo**, so `/skills revert:1` restores the exact earlier bytes and the
+history of what it taught itself stays inspectable.
 
 ## Policy
 
@@ -159,8 +175,8 @@ sudo systemctl enable --now oda
 journalctl -u oda -f
 ```
 
-- Data lives in `.data/` (SQLite `agent.db`, workspaces, console token, opencode runtime dirs). Back it up
-  with `sqlite3 .data/agent.db "VACUUM INTO '/backup/agent-$(date +%F).db'"`.
+- Data lives in `.data/` (SQLite `agent.db`, workspaces, console token, opencode runtime dirs). Snapshot it with
+  `bun run commands backup` (`VACUUM INTO .data/backups/…`, keeps the last 14) — safer than copying a live DB.
 - The bot never uses the globally installed `opencode`; the pinned 1.19.5 binary comes from `bun install` and
   the boot guard refuses to start on a version mismatch.
 - Production logs: `logs/app.log` and `logs/error.log` (pino), console output is pretty-printed in development.

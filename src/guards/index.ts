@@ -1,8 +1,9 @@
 import { config } from '@services/config.ts';
+import { tierOf } from '@services/policy/gate.ts';
 import { EPHEMERAL } from '@utils/constants.ts';
 import { OWNER_ID } from '@utils/env.ts';
 
-import type { ChatInputCommandInteraction } from 'discord.js';
+import type { ChatInputCommandInteraction, GuildMember } from 'discord.js';
 import type { Client, GuardFunction, Next } from 'discordx';
 
 type CooldownScope = 'user' | 'guild' | 'channel' | 'global';
@@ -74,6 +75,21 @@ export const guildEnabled: GuardFunction = async (
   if (interaction.guildId && config.guild(interaction.guildId)?.enabled) return next();
   await interaction.reply({
     'content': 'This server is not enabled yet — the owner can run `/enable`.',
+    'flags': EPHEMERAL,
+  });
+  return;
+};
+
+/** Guild managers and above: the rank the bridge gate requires for destructive actions. */
+export const managerOnly: GuardFunction = async (
+  interaction: ChatInputCommandInteraction,
+  _client: Client,
+  next: Next,
+) => {
+  const member = interaction.member as GuildMember | null;
+  if (tierOf(interaction.guildId ?? '', member) >= 3) return next();
+  await interaction.reply({
+    'content': 'This needs an admin (or the bot owner).',
     'flags': EPHEMERAL,
   });
   return;

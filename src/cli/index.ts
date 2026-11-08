@@ -4,7 +4,7 @@ import type { DeployScope } from './commands/registry.ts';
 
 const logger = log('cli');
 
-const SUBCOMMANDS = ['deploy', 'clear', 'list', 'auth', 'doctor', 'smoke', 'e2e'] as const;
+const SUBCOMMANDS = ['deploy', 'clear', 'list', 'auth', 'doctor', 'smoke', 'e2e', 'backup'] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 const printUsage = () => {
@@ -15,7 +15,10 @@ const printUsage = () => {
   logger.info('  auth     store the OpenCode credential that Jev accepts');
   logger.info('  doctor   preflight: binary, models, token, docker, clock skew, capabilities');
   logger.info('  smoke    offline end-to-end: spawn a server, prompt, stream, permission round-trip, jev');
-  logger.info('  e2e      live end-to-end: model calls a Discord tool through the bridge');
+  logger.info(
+    '  e2e      live end-to-end: model calls a Discord tool through the bridge (--write for structural tools)',
+  );
+  logger.info('  backup   consistent SQLite snapshot into .data/backups (keeps the last 14)');
 };
 
 const [subcommand, ...args] = process.argv.slice(2);
@@ -64,6 +67,11 @@ const run = async (name: Subcommand) => {
     case 'e2e':
       await import('./e2e.ts');
       break;
+    case 'backup': {
+      const { backup } = await import('./backup.ts');
+      await backup();
+      process.exit(0);
+    }
   }
 };
 

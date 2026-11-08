@@ -1,5 +1,6 @@
 import { models } from '@services/agent/models.ts';
 import { db } from '@services/database/sqlite.ts';
+import { feedbackSummary } from '@services/evolution/skills.ts';
 import { log } from '@utils/logger.ts';
 import { z } from 'zod';
 
@@ -24,6 +25,7 @@ const Reflection = z.object({
 export type Turn = {
   guildId: string;
   sessionId: string;
+  channelId?: string;
   userText: string;
   assistantText: string;
   toolCalls: Array<{ tool: string; status?: string; input?: unknown }>;
@@ -83,6 +85,7 @@ export async function reflectTurn(server: RunningServer, turn: Turn): Promise<nu
       call => `${call.tool}:${call.status ?? '?'}${call.input ? ` ${JSON.stringify(call.input).slice(0, 120)}` : ''}`,
     )
     .join('\n');
+  const signal = turn.channelId ? feedbackSummary(turn.guildId, turn.channelId) : undefined;
   const payload = [
     INSTRUCTIONS,
     '',
@@ -90,6 +93,9 @@ export async function reflectTurn(server: RunningServer, turn: Turn): Promise<nu
     `user: ${turn.userText.slice(0, 1500)}`,
     `assistant: ${turn.assistantText.slice(0, 2500)}`,
     `tools:\n${toolSummary || '(none)'}`,
+    signal
+      ? `reactions: ${signal.positive} positive, ${signal.negative} negative${signal.notes.length > 0 ? ` — notes: ${signal.notes.join(' | ')}` : ''}`
+      : 'reactions: none',
   ].join('\n');
 
   try {

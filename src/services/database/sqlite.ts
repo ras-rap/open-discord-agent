@@ -63,6 +63,34 @@ CREATE TABLE IF NOT EXISTS reflect_sessions (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS feedback (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id   TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  actor_id   TEXT NOT NULL,
+  signal     TEXT NOT NULL,
+  note       TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS feedback_once ON feedback(message_id, actor_id, signal);
+CREATE INDEX IF NOT EXISTS feedback_by_guild ON feedback(guild_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS artifacts (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id    TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  path        TEXT NOT NULL,
+  sha256      TEXT NOT NULL,
+  content     TEXT,
+  version     INTEGER NOT NULL,
+  approved_by TEXT,
+  created_at  INTEGER NOT NULL,
+  active      INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS artifacts_by_guild ON artifacts(guild_id, kind, active);
+
 CREATE TABLE IF NOT EXISTS tool_stats (
   guild_id TEXT NOT NULL,
   tool     TEXT NOT NULL,
@@ -72,6 +100,11 @@ CREATE TABLE IF NOT EXISTS tool_stats (
   PRIMARY KEY (guild_id, tool)
 );
 `);
+
+// --- migrations -------------------------------------------------------------
+const artifactColumns = db.query<{ name: string }, []>('PRAGMA table_info(artifacts)').all() as Array<{ name: string }>; // artifacts_content_migration
+if (!artifactColumns.some(column => column.name === 'content'))
+  db.exec('ALTER TABLE artifacts ADD COLUMN content TEXT');
 
 export type WorkspaceRow = {
   guild_id: string;
@@ -230,4 +263,104 @@ export const toolStats = {
          ON CONFLICT(guild_id, tool) DO UPDATE SET ok = ok + excluded.ok, fail = fail + excluded.fail, ms = ms + excluded.ms`,
       )
       .run(guildId, tool, ok ? 1 : 0, ok ? 0 : 1, Math.round(ms)),
+};
+
+export type FeedbackRow = {
+  id: number;
+  guild_id: string;
+  channel_id: string;
+  message_id: string;
+  actor_id: string;
+  signal: string;
+  note: string | null;
+  created_at: number;
+};
+
+export const feedback = {
+  /** Reactions can arrive twice (add/remove/add); the unique index makes recording idempotent. */
+  'record': (row: Omit<FeedbackRow, 'id' | 'created_at'>) =>
+    db
+      .query(
+        `INSERT OR IGNORE INTO feedback (guild_id, channel_id, message_id, actor_id, signal, note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(row.guild_id, row.channel_id, row.message_id, row.actor_id, row.signal, row.note, Date.now()),
+  'since': (guildId: string, channelId: string, sinceMs: number) =>
+    db
+      .query<FeedbackRow, [string, string, number]>(
+        `SELECT * FROM feedback WHERE guild_id = ? AND channel_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 20`,
+      )
+      .all(guildId, channelId, sinceMs),
+  'recent': (guildId: string, limit = 20) =>
+    db
+      .query<FeedbackRow, [string, number]>(
+        'SELECT * FROM feedback WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?',
+      )
+      .all(guildId, limit),
+  'stats': (guildId: string) => {
+    const rows = db
+      .query<{ signal: string; n: number }, [string]>(
+        'SELECT signal, COUNT(*) AS n FROM feedback WHERE guild_id = ? GROUP BY signal',
+      )
+      .all(guildId);
+    return Object.fromEntries(rows.map(row => [row.signal, row.n]));
+  },
+};
+
+export type ArtifactRow = {
+  id: number;
+  guild_id: string;
+  kind: string;
+  name: string;
+  path: string;
+  sha256: string;
+  content: string | null;
+  version: number;
+  approved_by: string | null;
+  created_at: number;
+  active: number;
+};
+
+export const artifacts = {
+  'nextVersion': (guildId: string, kind: string, name: string) => {
+    const row = db
+      .query<{ v: number | null }, [string, string, string]>(
+        'SELECT MAX(version) AS v FROM artifacts WHERE guild_id = ? AND kind = ? AND name = ?',
+      )
+      .get(guildId, kind, name);
+    return (row?.v ?? 0) + 1;
+  },
+  'record': (row: Omit<ArtifactRow, 'id' | 'created_at' | 'active'> & { content: string }) =>
+    db
+      .query(
+        `INSERT INTO artifacts (guild_id, kind, name, path, sha256, content, version, approved_by, created_at, active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      )
+      .run(
+        row.guild_id,
+        row.kind,
+        row.name,
+        row.path,
+        row.sha256,
+        row.content,
+        row.version,
+        row.approved_by,
+        Date.now(),
+      ),
+  'list': (guildId: string, onlyActive = true) =>
+    onlyActive
+      ? db
+          .query<ArtifactRow, [string]>(
+            'SELECT * FROM artifacts WHERE guild_id = ? AND active = 1 ORDER BY created_at DESC, id DESC',
+          )
+          .all(guildId)
+      : db
+          .query<ArtifactRow, [string]>('SELECT * FROM artifacts WHERE guild_id = ? ORDER BY created_at DESC, id DESC')
+          .all(guildId),
+  'latest': (guildId: string, kind: string, name: string) =>
+    db
+      .query<ArtifactRow, [string, string, string]>(
+        'SELECT * FROM artifacts WHERE guild_id = ? AND kind = ? AND name = ? ORDER BY version DESC LIMIT 1',
+      )
+      .get(guildId, kind, name),
 };
