@@ -6,7 +6,7 @@ import { buildSkillProposal, renderProposal } from '@services/evolution/proposal
 import { readSkill, revertSkill, writeSkill } from '@services/evolution/skills.ts';
 import { BRAND_COLOR, EPHEMERAL } from '@utils/constants.ts';
 import { log } from '@utils/logger.ts';
-import { EmbedBuilder, MessageFlags } from 'discord.js';
+import { EmbedBuilder } from 'discord.js';
 import { Discord, Guard, Slash, SlashOption } from 'discordx';
 
 import type { ApplicationCommandOptionType as OptionType, ChatInputCommandInteraction } from 'discord.js';
