@@ -1,4 +1,4 @@
-import { Memory, normalizeKey } from '@services/memory/store.ts';
+import { Memory, matchTerms, normalizeKey } from '@services/memory/store.ts';
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 
@@ -79,5 +79,44 @@ describe('memory store', () => {
     const digest = memory.digest('g');
     expect(digest).toContain('## Facts');
     expect(digest).toContain('## Lessons');
+  });
+
+  /**
+   * Regression: the recall query was built from the raw prompt, so a mention containing `.env` reached FTS5
+   * MATCH as syntax and threw `fts5: syntax error near "."`, which aborted the whole turn before the model ran.
+   */
+  test('a prompt full of query syntax is recalled, not thrown back', () => {
+    const memory = fresh();
+    // Deliberately the least important and oldest row: only a working MATCH can surface it, since the recency
+    // fallback ranks importance first and is asked for fewer rows than exist.
+    memory.add({
+      'guildId': 'g',
+      'kind': 'fact',
+      'key': 'role',
+      'text': 'kirby is the moderation bot',
+      'importance': 0.1,
+    });
+    for (let index = 0; index < 4; index += 1)
+      memory.add({
+        'guildId': 'g',
+        'kind': 'fact',
+        'key': `filler-${index}`,
+        'text': `unrelated note ${index}`,
+        'importance': 0.9,
+      });
+
+    const prompt =
+      "@Kirby I gave you a file called for-agent.env containing a discord bot token, the bot is @Chloe's test " +
+      'bot, turn it into a moderation bot using this bot template https://github.com/ras-rap/discord-bot-template';
+
+    expect(memory.search('g', prompt, 2).map(hit => hit.text)).toContain('kirby is the moderation bot');
+  });
+
+  test('match terms are quoted literals, so punctuation and operators carry no meaning', () => {
+    expect(matchTerms('for-agent.env')).toEqual(['"for"*', '"agent"*', '"env"*']);
+    // `AND`, `OR`, `NOT`, `NEAR` are FTS5 operators unless quoted; short words (a, b, c) are dropped.
+    expect(matchTerms('a AND b OR "c" NOT d* (e)')).toEqual(['"and"*', '"not"*']);
+    expect(matchTerms('https://github.com/ras-rap/x').every(term => /^"[\p{L}\p{N}]+"\*$/u.test(term))).toBe(true);
+    expect(matchTerms('   ')).toEqual([]);
   });
 });

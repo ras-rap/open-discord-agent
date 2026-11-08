@@ -1,8 +1,27 @@
 import { db as appDb } from '@services/database/sqlite.ts';
+import { log } from '@utils/logger.ts';
 
 import type { Database } from 'bun:sqlite';
 
+const logger = log('memory');
+
 export type MemoryKind = 'fact' | 'preference' | 'lesson' | 'pointer';
+
+const MAX_TERMS = 8;
+
+/**
+ * FTS5 treats `.` `/` `:` `-` `"` `*` and friends as query syntax, so a prompt like "for-agent.env" reaches
+ * MATCH as an error (`fts5: syntax error near "."`) and takes the whole turn with it. Words are therefore
+ * reduced to letter/number runs and each one is quoted, which is how FTS5 spells "this text, literally".
+ * Quoting also neutralises `AND`/`OR`/`NOT`/`NEAR`, so user text can never become an operator.
+ */
+export function matchTerms(query: string): string[] {
+  const words = query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(word => word.length > 2);
+  return [...new Set(words)].slice(0, MAX_TERMS).map(word => `"${word}"*`);
+}
 
 export type MemoryRow = {
   id: number;
@@ -123,23 +142,27 @@ export class Memory {
   }
 
   search(guildId: string, query: string, limit = 8): MemoryHit[] {
-    const trimmed = query.trim();
-    if (trimmed.length === 0) return this.recent(guildId, limit);
-    const terms = normalizeKey(trimmed)
-      .split(' ')
-      .filter(word => word.length > 2)
-      .slice(0, 8)
-      .map(word => `${word.replace(/"/g, '')}*`);
+    const terms = matchTerms(query);
     if (terms.length === 0) return this.recent(guildId, limit);
 
-    const rows = this.db
-      .query<MemoryRow & { bm25: number }, [string, string, number]>(
-        `SELECT m.*, bm25(memory_fts) AS bm25
-           FROM memory_fts JOIN memory m ON m.id = memory_fts.rowid
-          WHERE memory_fts MATCH ? AND m.guild_id = ? AND m.superseded_by IS NULL
-          ORDER BY bm25 LIMIT ?`,
-      )
-      .all(terms.join(' OR '), guildId, limit * 3);
+    let rows: Array<MemoryRow & { bm25: number }>;
+    try {
+      rows = this.db
+        .query<MemoryRow & { bm25: number }, [string, string, number]>(
+          `SELECT m.*, bm25(memory_fts) AS bm25
+             FROM memory_fts JOIN memory m ON m.id = memory_fts.rowid
+            WHERE memory_fts MATCH ? AND m.guild_id = ? AND m.superseded_by IS NULL
+            ORDER BY bm25 LIMIT ?`,
+        )
+        .all(terms.join(' OR '), guildId, limit * 3);
+    } catch (error) {
+      // Recall is optional context for a prompt; it must never be the reason a turn fails.
+      logger.warn('memory search failed, falling back to recency', {
+        guildId,
+        'error': String(error).slice(0, 160),
+      });
+      return this.recent(guildId, limit);
+    }
 
     const now = Date.now();
     const scored = rows.map(row => {
