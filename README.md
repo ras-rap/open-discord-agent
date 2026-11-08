@@ -86,6 +86,7 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 | `/remember <text>` | store a durable fact (rewrites the workspace `MEMORY.md`) |
 | `/memory [query] [forget]` | search, show stats, or delete a memory by id |
 | `/ping` | interaction latency, gateway ping, pid |
+| *(cards)* | the agent's `question` tool and `permission.asked` both arrive as answerable cards — buttons, or a select menu when a question offers more than five options |
 | `/enable` | owner only: allow this server |
 
 Mentioning the bot or replying to one of its messages also starts a task.
@@ -171,6 +172,7 @@ invalidates the first gateway session, after which interactions arrive late and 
 | shell refuses with "docker is not available" | start Docker or set `shell.mode: "host"` for that guild |
 | `Free usage exceeded, subscribe to Go` | the model call used the free tier: run `bun run auth` so a Go-entitled key is stored, then `bun run doctor` (expect `✅ go subscription 200`) |
 | `Unknown interaction` (10062), or commands answer "The application did not respond" | the gateway delivered the interaction after Discord's 3s window — usually a second process on the same token (the lock file blocks that) or a paused host; `/ping` reports interaction latency, gateway ping and pid |
+| the agent says "question · running" and nothing arrives | it used opencode's `question` tool; the card should be posted in the channel (answer buttons or a select). If it is missing, check the bot log for `could not post question card` |
 | approvals never appear | check `/status` → `policy`; the event name is `permission.asked` (not `permission.updated`) |
 | commands appear twice | deploy once per scope: `bun run commands deploy --guild` clears the global set, `--global` clears the guild copy |
 | `/enable` says owner only | `OWNER_ID` in `.env` must be your Discord user id |

@@ -1,12 +1,26 @@
 import { sessions } from '@services/database/sqlite.ts';
 import { cancelApprovalsForSession, requestApproval } from '@services/discord/approvals.ts';
+import {
+  cancelQuestion,
+  pendingForSession as pendingQuestionsForSession,
+  requestAnswers,
+} from '@services/discord/questions.ts';
 import { StreamRenderer } from '@services/discord/render.ts';
 import { memoryContext, writeDigest } from '@services/memory/inject.ts';
 import { reflectTurn, worthReflecting } from '@services/memory/reflect.ts';
 import { tierOf } from '@services/policy/gate.ts';
 import { log } from '@utils/logger.ts';
 
-import { isDelta, isIdle, isPermissionAsked, isRetry, isToolPart, type AgentEvent } from './events.ts';
+import {
+  isDelta,
+  isIdle,
+  isPermissionAsked,
+  isQuestionAsked,
+  isRetry,
+  isToolPart,
+  type AgentEvent,
+  type QuestionAsked,
+} from './events.ts';
 import { models } from './models.ts';
 
 import type { Supervisor } from './supervisor.ts';
@@ -113,6 +127,11 @@ export class Runtime {
     } finally {
       this.streams.delete(sessionId);
       cancelApprovalsForSession(sessionId);
+      for (const question of pendingQuestionsForSession(sessionId)) {
+        logger.warn('cancelling unanswered question at end of turn', { 'requestId': question.requestId });
+        cancelQuestion(question.requestId);
+        await server.opencode.rejectQuestion(question.requestId, 'turn ended');
+      }
     }
   }
 
@@ -139,6 +158,42 @@ export class Runtime {
       return;
     }
     if (isPermissionAsked(event)) void this.handlePermissionAsk(guildId, event);
+    if (isQuestionAsked(event)) void this.handleQuestionAsked(guildId, event, stream);
+  }
+
+  /**
+   * opencode's `question` tool blocks until answered. It is surfaced as a Discord card; if nobody answers
+   * within the timeout the question is rejected so the agent continues instead of stalling the session.
+   */
+  private async handleQuestionAsked(guildId: string, event: QuestionAsked, stream: Stream | undefined): Promise<void> {
+    const server = this.supervisor.get(guildId);
+    const session = sessions.byOpenCodeId(event.properties.sessionID);
+    const first = event.properties.questions[0]?.question ?? 'question';
+    stream?.renderer.setStatus(`❓ ${first.slice(0, 140)}`);
+
+    if (!server || !session) {
+      logger.warn('question without server/session; rejecting', { guildId, 'requestID': event.properties.id });
+      await server?.opencode.rejectQuestion(event.properties.id, 'session not bound');
+      return;
+    }
+
+    const answers = await requestAnswers({
+      'client': this.client,
+      'guildId': guildId,
+      'chatKey': session.chat_key,
+      'channelId': session.channel_id,
+      'sessionId': event.properties.sessionID,
+      'requestId': event.properties.id,
+      'questions': event.properties.questions,
+    });
+
+    if (!answers) {
+      await server.opencode.rejectQuestion(event.properties.id, 'no answer in Discord');
+      return;
+    }
+    const delivered = await server.opencode.replyQuestion(event.properties.id, answers);
+    logger.info('question answered', { 'requestID': event.properties.id, answers, delivered });
+    stream?.renderer.setStatus(`✅ answered: ${answers.flat().join(', ').slice(0, 120)}`);
   }
 
   private async handlePermissionAsk(

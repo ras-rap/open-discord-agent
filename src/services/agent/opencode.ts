@@ -91,6 +91,35 @@ export class Opencode {
     return res.ok;
   }
 
+  /** Answers are one array of selected labels per question, in the order the server asked them. */
+  async replyQuestion(requestID: string, answers: string[][]): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/question/${encodeURIComponent(requestID)}/reply`, {
+      'method': 'POST',
+      'headers': { ...this.auth, 'content-type': 'application/json' },
+      'body': JSON.stringify({ 'answers': answers }),
+    });
+    if (!res.ok)
+      logger.warn('question reply rejected', {
+        requestID,
+        'status': res.status,
+        'body': (await res.text()).slice(0, 200),
+      });
+
+    return res.ok;
+  }
+
+  /** Cancels a pending question; the tool completes as `error` and the agent keeps running. */
+  async rejectQuestion(requestID: string, reason = 'no answer in Discord'): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/question/${encodeURIComponent(requestID)}/reject`, {
+      'method': 'POST',
+      'headers': { ...this.auth, 'content-type': 'application/json' },
+      'body': JSON.stringify({ 'reason': reason }),
+    });
+    if (!res.ok) logger.warn('question reject rejected', { requestID, 'status': res.status });
+
+    return res.ok;
+  }
+
   /** SSE pump with reconnect. Frames are `data: <json>` separated by a blank line, as observed in §0.1. */
   subscribe(onEvent: (event: AgentEvent) => void, signal: AbortSignal): void {
     const pump = async () => {

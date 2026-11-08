@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { assertPinnedBinary } from '@services/agent/binary.ts';
-import { isDelta, isIdle, isPermissionAsked, type AgentEvent } from '@services/agent/events.ts';
+import { isDelta, isIdle, isPermissionAsked, isQuestionAsked, type AgentEvent } from '@services/agent/events.ts';
 import { models } from '@services/agent/models.ts';
 import { Supervisor } from '@services/agent/supervisor.ts';
 import { paths } from '@services/config.ts';
@@ -86,6 +86,32 @@ async function main(): Promise<void> {
     } else record('permission round-trip', false, 'no permission.asked event within deadline');
 
     await waitIdle(server, shellSession, events);
+
+    events.length = 0;
+    const questionSession = await server.opencode.createSession('smoke-question');
+    await server.opencode.prompt(
+      questionSession,
+      'Use the question tool to ask whether to use emoji in channel names (options: Yes, No). Wait for the answer, then reply with just the answer.',
+      models.primary(),
+    );
+    let questionId: string | undefined;
+    const questionDeadline = Date.now() + DEADLINE_MS;
+    while (Date.now() < questionDeadline && !questionId) {
+      questionId = events.find(isQuestionAsked)?.properties.id;
+      if (!questionId) await Bun.sleep(200);
+    }
+    if (questionId) {
+      const asked = events.find(isQuestionAsked);
+      const label = asked?.properties.questions[0]?.options[0]?.label ?? 'Yes';
+      const delivered = await server.opencode.replyQuestion(questionId, [[label]]);
+      const finished = await waitIdle(server, questionSession, events);
+      const answerText = await server.opencode.lastText(questionSession);
+      record(
+        'question round-trip',
+        delivered && finished,
+        `asked ${questionId}, answered "${label}", replied=${delivered}, final=${JSON.stringify(answerText.slice(0, 40))}`,
+      );
+    } else record('question round-trip', false, 'no question.asked event within deadline');
 
     if (consoleToken()) {
       const answers = await askJev(

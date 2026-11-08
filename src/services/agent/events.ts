@@ -83,3 +83,27 @@ export type RetryEvent = {
 export function isRetry(event: AgentEvent): event is RetryEvent {
   return event.type === 'session.status' && (event as StatusEvent).properties?.status?.type === 'retry';
 }
+
+export type QuestionOption = { label: string; description?: string };
+
+export type QuestionInfo = {
+  question: string;
+  header?: string;
+  options: QuestionOption[];
+  multiple?: boolean;
+};
+
+export type QuestionAsked = {
+  type: 'question.asked';
+  properties: {
+    id: string;
+    sessionID: string;
+    questions: QuestionInfo[];
+    tool?: { messageID: string; callID: string };
+  };
+};
+
+/** The pinned server emits `question.asked`; answers go back to `POST /question/{id}/reply`. */
+export function isQuestionAsked(event: AgentEvent): event is QuestionAsked {
+  return event.type === 'question.asked';
+}
