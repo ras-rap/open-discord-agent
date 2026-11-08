@@ -2,13 +2,16 @@ import { importx } from '@discordx/importer';
 import { DISCORD_CLIENT_ID, DISCORD_TOKEN, IS_PRODUCTION, developmentGuildId } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 import { REST, Routes } from 'discord.js';
-import { Client } from 'discordx';
+import { Client, MetadataStorage } from 'discordx';
 
 import type { DeployScope } from './registry.ts';
 
 const logger = log('cli/list');
 
 await importx(`${import.meta.dirname}/../../{commands,guards}/**/*.ts`);
+// Decorated options and slash groups are attached by `build()`, not by importing the modules: without it the
+// payload would publish `/ask` with no `prompt` argument and `/model current` as a bare top-level command.
+await MetadataStorage.instance.build();
 
 const rest = new REST({ 'version': '10' }).setToken(DISCORD_TOKEN);
 
