@@ -213,3 +213,68 @@ export class Memory {
 
 /** App-bound instance: the bot's own SQLite database, created once at boot. */
 export const memory = new Memory(appDb);
+
+/** Consolidation helpers live on the store so prune/decay rules stay next to the schema they touch. */
+export class MemoryMaintenance {
+  constructor(private readonly db: Database) {}
+
+  /** Drops rows nothing ever recalled, that are old, and that nobody rates highly. */
+  prune(guildId: string, opts: { olderThanDays?: number; maxImportance?: number } = {}): number {
+    const olderThanDays = opts.olderThanDays ?? 90;
+    const maxImportance = opts.maxImportance ?? 0.3;
+    const cutoff = Date.now() - olderThanDays * 86_400_000;
+    // sqlite3_changes also counts the FTS trigger's work, so the row count is measured before deleting.
+    const doomed = this.db
+      .query<{ n: number }, [string, number, number]>(
+        'SELECT COUNT(*) AS n FROM memory WHERE guild_id = ? AND created_at < ? AND importance < ? AND uses = 0 AND superseded_by IS NULL',
+      )
+      .get(guildId, cutoff, maxImportance);
+    this.db
+      .query(
+        'DELETE FROM memory WHERE guild_id = ? AND created_at < ? AND importance < ? AND uses = 0 AND superseded_by IS NULL',
+      )
+      .run(guildId, cutoff, maxImportance);
+    return doomed?.n ?? 0;
+  }
+
+  /** Old rows lose importance gradually unless they keep being recalled. */
+  applyDecay(guildId: string, factor = 0.98): number {
+    const cutoff = Date.now() - 30 * 86_400_000;
+    const affected = this.db
+      .query<{ n: number }, [string, number]>(
+        'SELECT COUNT(*) AS n FROM memory WHERE guild_id = ? AND created_at < ? AND uses = 0 AND superseded_by IS NULL',
+      )
+      .get(guildId, cutoff);
+    this.db
+      .query(
+        'UPDATE memory SET importance = MAX(importance * ?, 0.05) WHERE guild_id = ? AND created_at < ? AND uses = 0 AND superseded_by IS NULL',
+      )
+      .run(factor, guildId, cutoff);
+    return affected?.n ?? 0;
+  }
+
+  /** Collapses rows with the same normalised text, keeping the most important and superseding the rest. */
+  dedupe(guildId: string): number {
+    const rows = this.db
+      .query<MemoryRow, [string]>(
+        'SELECT * FROM memory WHERE guild_id = ? AND superseded_by IS NULL ORDER BY importance DESC, created_at DESC',
+      )
+      .all(guildId);
+    const keeper = new Map<string, MemoryRow>();
+    let superseded = 0;
+    for (const row of rows) {
+      const signature = `${row.kind}:${normalizeKey(row.text)}`;
+      const existing = keeper.get(signature);
+      if (!existing) {
+        keeper.set(signature, row);
+        continue;
+      }
+      this.db.query('UPDATE memory SET superseded_by = ? WHERE id = ?').run(existing.id, row.id);
+      superseded += 1;
+    }
+    return superseded;
+  }
+}
+
+/** App-bound maintenance helpers. */
+export const memoryMaintenance = new MemoryMaintenance(appDb);

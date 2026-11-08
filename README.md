@@ -50,6 +50,8 @@ Then in your server: `/enable` (owner only), and `/ask <prompt>` or mention the 
 | `bun run commands deploy\|clear\|list` | slash-command registration (`--global`, `--guild`, `--force`) |
 | `bun run commands auth\|doctor\|smoke\|e2e\|backup` | agent tooling (`auth` probes Go first then Jev; `backup` writes a consistent SQLite snapshot, keeping 14) |
 
+Fixtures live in `config/fixtures/*.json` and are loaded by `/eval` and the promotion gate.
+
 ## Project layout
 
 ```text
@@ -87,6 +89,7 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 | `/memory [query] [forget]` | search, show stats, or delete a memory by id |
 | `/learn` | compile stored lessons into a `SKILL.md` proposal and review the diff (admin) |
 | `/skills [revert] [name]` | list artifacts, feedback counts, current skill file; restore a version |
+| `/eval` | replay `config/fixtures` against the current agent and print pass rate + failing checks |
 | `/ping` | interaction latency, gateway ping, pid |
 | *(cards)* | the agent's `question` tool and `permission.asked` both arrive as answerable cards — buttons, or a select menu when a question offers more than five options |
 | `/enable` | owner only: allow this server |
@@ -130,10 +133,20 @@ Three signals feed one loop, and every change is gated:
    and folded into the next reflection pass so a thumbs-down actually teaches something.
 3. **lessons** — the `beam-free` reflector turns turns into `facts`/`preferences`/`lessons`.
 
-`/learn` ranks those lessons and renders a diff. On approval the bot writes
-`.data/workspaces/<guild>/.opencode/skills/learned-playbook/SKILL.md`, records the version (content + sha256) in
-`artifacts`, and **commits the workspace repo**, so `/skills revert:1` restores the exact earlier bytes and the
-history of what it taught itself stays inspectable.
+`/learn` ranks those lessons and renders a diff. On approval the change goes through an **A/B gate** before it is
+allowed to stay:
+
+1. replay every fixture in `config/fixtures/*.json` against the incumbent skill state → baseline rate
+2. write the candidate, restart that guild's opencode server (skills load at start-up), replay again
+3. keep it only if the candidate is not worse; otherwise restore the previous bytes and say so
+
+When it survives, the bot writes `.data/workspaces/<guild>/.opencode/skills/learned-playbook/SKILL.md`, records the
+version (content + sha256) in `artifacts`, and **commits the workspace repo** — so `/skills revert:1` restores the
+exact earlier bytes and the history of what it taught itself stays inspectable. Fixtures assert tool usage, output
+patterns, and forbidden leaks, and can add a Jev yes/no judgement on the answer.
+
+A scheduler runs deterministic upkeep: memory consolidation (dedupe, decay, prune, rewrite `MEMORY.md`) every 6 h
+and a database snapshot every 24 h.
 
 ## Policy
 

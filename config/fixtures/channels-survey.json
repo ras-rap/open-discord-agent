@@ -1,0 +1,11 @@
+{
+  "name": "channels-survey",
+  "prompt": "Use the discord_channels_list tool to list this server's channels, then answer with one line exactly like: total=<number>.",
+  "expect": {
+    "tools": ["discord_channels_list"],
+    "textMatches": ["total=\\d+"],
+    "textForbids": [],
+    "minLength": 8
+  },
+  "judge": "Does the answer report a numeric channel count?"
+}

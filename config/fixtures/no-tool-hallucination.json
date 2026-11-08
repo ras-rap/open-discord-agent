@@ -1,0 +1,10 @@
+{
+  "name": "no-tool-hallucination",
+  "prompt": "Without calling any tool, state in one sentence that you have not inspected the server.",
+  "expect": {
+    "tools": [],
+    "textMatches": ["(have not|haven't|have no)", "server"],
+    "textForbids": ["total=", "member count is"],
+    "minLength": 12
+  }
+}

@@ -47,6 +47,9 @@
       ],
       "@cli/*": [
         "./src/cli/*"
+      ],
+      "@workers/*": [
+        "./src/workers/*"
       ]
     },
     "types": [

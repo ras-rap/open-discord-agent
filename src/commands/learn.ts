@@ -2,8 +2,10 @@ import { guildEnabled, guildOnly, managerOnly } from '@guards/index.ts';
 import { artifacts, feedback } from '@services/database/sqlite.ts';
 import { requestApproval } from '@services/discord/approvals.ts';
 import { services } from '@services/discord/services.ts';
+import { gateCandidate } from '@services/evolution/compare.ts';
+import { loadFixtures } from '@services/evolution/fixtures.ts';
 import { buildSkillProposal, renderProposal } from '@services/evolution/proposals.ts';
-import { readSkill, revertSkill, writeSkill } from '@services/evolution/skills.ts';
+import { readSkill, revertSkill } from '@services/evolution/skills.ts';
 import { BRAND_COLOR, EPHEMERAL } from '@utils/constants.ts';
 import { log } from '@utils/logger.ts';
 import { EmbedBuilder } from 'discord.js';
@@ -43,15 +45,29 @@ export class LearnCommand {
     });
 
     if (outcome === 'allowed' || outcome === 'always') {
-      const written = writeSkill(guildId, proposal.name, proposal.content, interaction.user.id);
-      logger.info('skill approved', {
+      const fixtures = loadFixtures();
+      await interaction.followUp({
+        'content': `🧪 evaluating ${fixtures.length} fixture(s) against the incumbent before writing…`,
+        'flags': EPHEMERAL,
+      });
+      const gate = await gateCandidate({
+        'supervisor': services.get().supervisor,
+        'guildId': guildId,
+        'guildName': interaction.guild?.name ?? 'guild',
+        'name': proposal.name,
+        'content': proposal.content,
+        'fixtures': fixtures,
+        'approvedBy': interaction.user.id,
+      });
+      logger.info('gate decided', {
         guildId,
         'name': proposal.name,
-        'version': written.version,
+        'promoted': gate.promoted,
+        'reason': gate.reason,
         'by': interaction.user.id,
       });
       await interaction.followUp({
-        'content': `🧠 wrote \`.opencode/skills/${proposal.name}/SKILL.md\` v${written.version} (${proposal.lessonCount} lessons) — it loads on the next turn`,
+        'content': `${gate.promoted ? '🧠 promoted' : '🚫 not promoted'} \`.opencode/skills/${proposal.name}/SKILL.md\` — ${gate.reason}`,
         'flags': EPHEMERAL,
       });
       return;

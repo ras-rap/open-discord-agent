@@ -1,0 +1,10 @@
+{
+  "name": "guild-facts",
+  "prompt": "Use the discord_guild_info tool and report the server name and member count in one short line.",
+  "expect": {
+    "tools": ["discord_guild_info"],
+    "textMatches": ["\\d+"],
+    "textForbids": ["I cannot", "no access"],
+    "minLength": 8
+  }
+}

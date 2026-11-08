@@ -9,6 +9,7 @@ import { memory } from '@services/memory/store.ts';
 import { AUTO_REGISTER_COMMANDS, DISCORD_TOKEN, IS_PRODUCTION, NODE_ENV, assertRuntimeEnv } from '@utils/env.ts';
 import { acquireInstanceLock } from '@utils/instance-lock.ts';
 import { log } from '@utils/logger.ts';
+import { Scheduler } from '@workers/scheduler.ts';
 
 import { client } from '@/client.ts';
 
@@ -30,6 +31,8 @@ async function main() {
 
   const bridge = startBridge(client);
   await supervisor.start();
+  const scheduler = new Scheduler(supervisor);
+  scheduler.start();
   logger.info('runtime ready', { 'env': NODE_ENV, 'production': IS_PRODUCTION, 'bridge': bridge.port ?? 0 });
 
   if (AUTO_REGISTER_COMMANDS) await syncCommands();
@@ -37,6 +40,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info('shutting down', { signal });
     bridge.stop(true);
+    scheduler.stop();
     await supervisor.stopAll();
     client.destroy();
     process.exit(0);
