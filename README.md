@@ -90,6 +90,8 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 | `/learn` | compile stored lessons into a `SKILL.md` proposal and review the diff (admin) |
 | `/skills [revert] [name]` | list artifacts, feedback counts, current skill file; restore a version |
 | `/eval` | replay `config/fixtures` against the current agent and print pass rate + failing checks |
+| `/undo` | revert the last turn's file changes in this server's workspace (admin) |
+| `/skill-file [name]` | print the learned skill file |
 | `/ping` | interaction latency, gateway ping, pid |
 | *(cards)* | the agent's `question` tool and `permission.asked` both arrive as answerable cards — buttons, or a select menu when a question offers more than five options |
 | `/enable` | owner only: allow this server |
@@ -180,6 +182,13 @@ unlikely to be approved. Without a credential the gate degrades to "ask a human"
 }
 ```
 
+### File-edit policy
+
+Every workspace is a git repo with an initial commit. Inside `repo/` the agent may write and edit **without an
+approval card** — that is the code sandbox, each turn is committed (`agent: turn …`), and `/undo` reverts the last
+turn. Control files stay denied to the agent (`opencode.json`, `AGENTS.md`, `.opencode/**`, `MEMORY.md`), and any
+edit outside `repo/` still asks a human.
+
 ## Ops (Linux VM)
 
 ```bash
@@ -205,6 +214,7 @@ invalidates the first gateway session, after which interactions arrive late and 
 | `opencode binary not found` | postinstall skipped → `bun pm trust opencode-ai && bun install` |
 | `server reported version X, expected 1.19.5` | a different binary is being picked up → `bun run doctor`, check `OPENCODE_BIN` |
 | member list is empty | `GuildMembers` intent not enabled in the Discord dev portal |
+| a tool sits at "write · pending" | a `write`/`edit` outside `repo/` is waiting for an approval card — answer it, or move the work under `repo/` where edits are click-free; the streaming message now says `🔒 waiting for approval` when this happens |
 | shell refuses with "docker is not available" | start Docker or set `shell.mode: "host"` for that guild |
 | `Free usage exceeded, subscribe to Go` | the model call used the free tier: run `bun run auth` so a Go-entitled key is stored, then `bun run doctor` (expect `✅ go subscription 200`) |
 | `Unknown interaction` (10062), or commands answer "The application did not respond" | the gateway delivered the interaction after Discord's 3s window — usually a second process on the same token (the lock file blocks that) or a paused host; `/ping` reports interaction latency, gateway ping and pid |

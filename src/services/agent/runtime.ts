@@ -6,6 +6,7 @@ import {
   requestAnswers,
 } from '@services/discord/questions.ts';
 import { StreamRenderer } from '@services/discord/render.ts';
+import { commitWorkspace } from '@services/evolution/skills.ts';
 import { memoryContext, writeDigest } from '@services/memory/inject.ts';
 import { reflectTurn, worthReflecting } from '@services/memory/reflect.ts';
 import { tierOf } from '@services/policy/gate.ts';
@@ -107,6 +108,8 @@ export class Runtime {
       const finalText = await server.opencode.lastText(sessionId);
       await renderer.finish(finalText);
       sessions.touch(chatKey);
+      // Snapshot the workspace: code edits need no approval precisely because they are always revertible.
+      commitWorkspace(input.guildId, `agent: turn ${chatKey} ${new Date().toISOString()}`);
 
       const toolCalls = this.streams.get(sessionId)?.toolCalls ?? [];
       if (worthReflecting({ 'userText': input.text, 'assistantText': finalText, toolCalls }))

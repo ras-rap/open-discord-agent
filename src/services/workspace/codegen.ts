@@ -70,12 +70,19 @@ export function renderWorkspaceConfig(): string {
       'model': MODELS.primary,
       'provider': { 'opencode-go': { 'options': { 'apiKey': '{env:OPENCODE_GO_API_KEY}' } } },
       'permission': {
+        // Inside repo/ the agent may write freely: that is the code sandbox, every turn is git-committed, and
+        // /undo reverts it. Control files stay denied; everything else asks a human.
         'edit': {
           '*': 'ask',
+          '*repo/*': 'allow',
+          '*repo/**': 'allow',
+          'repo/*': 'allow',
+          'repo/**': 'allow',
           '.opencode/*': 'deny',
           '.opencode/**': 'deny',
           'opencode.json': 'deny',
           'AGENTS.md': 'deny',
+          'MEMORY.md': 'deny',
         },
         'bash': { '*': 'ask' },
         'webfetch': 'ask',

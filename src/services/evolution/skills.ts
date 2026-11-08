@@ -130,3 +130,20 @@ export function feedbackSummary(
       .slice(0, 5),
   };
 }
+
+/** Drops the last workspace commit (the previous turn's file changes). Repo-scoped, so config is untouched. */
+export function undoWorkspace(guildId: string): { 'reverted': boolean; 'detail': string } {
+  const cwd = resolve(paths.workspaces, guildId);
+  const git = Bun.which('git');
+  if (!git) return { 'reverted': false, 'detail': 'git not available' };
+  if (!existsSync(resolve(cwd, '.git'))) return { 'reverted': false, 'detail': 'no history yet' };
+  const run = (argv: string[]) => Bun.spawnSync([git, ...argv], { 'cwd': cwd, 'stdout': 'pipe', 'stderr': 'pipe' });
+
+  const count = Number(run(['rev-list', '--count', 'HEAD']).stdout.toString().trim() || '0');
+  if (count <= 1) return { 'reverted': false, 'detail': 'nothing to undo' };
+  const head = run(['log', '-1', '--pretty=%s']).stdout.toString().trim();
+  const reset = run(['reset', '--hard', 'HEAD~1']);
+  if (reset.exitCode !== 0) return { 'reverted': false, 'detail': reset.stderr.toString().slice(0, 120) };
+  logger.info('workspace reverted', { guildId, 'undone': head });
+  return { 'reverted': true, 'detail': head };
+}
