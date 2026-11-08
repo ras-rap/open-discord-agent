@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { BRIDGE_PORT, JEV_MODE, OPENCODE_BIN, OPENCODE_CLI, OWNER_ID } from '@utils/env.ts';
+import { BRIDGE_PORT, JEV_MODE, OPENCODE_BIN, OPENCODE_CLI, OWNER_ID, optionalEnv } from '@utils/env.ts';
 import { z } from 'zod';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -27,6 +27,8 @@ const GuildConfigSchema = z.object({
   'roles': z
     .object({ 'admin': z.array(z.string()).default([]), 'trusted': z.array(z.string()).default([]) })
     .default({}),
+  /** `/model set` writes here; unset roles fall back to the deployment defaults in MODELS. */
+  'model': z.object({ 'primary': z.string().min(3).optional(), 'fast': z.string().min(3).optional() }).default({}),
 });
 
 export type GuildSettings = z.infer<typeof GuildConfigSchema>;
@@ -46,13 +48,18 @@ function readGuilds(): z.infer<typeof GuildsFile> {
 }
 
 /**
- * OpenCode Go serves its models from https://opencode.ai/inference/go — a different base URL from the free
- * tier, which is what "Free usage exceeded, subscribe to Go" means. Provider ids must be opencode-go/*.
+ * Role → `provider/model`. Every role is overridable from `.env`, and `/model set` overrides a role for one
+ * guild. `MODEL_FAST` is used for reflection/consolidation so bulk text never touches the expensive model.
+ *
+ * The default pair is the OpenCode Go subscription: the provider is served from
+ * https://opencode.ai/inference/go — a different base URL from the free tier, which is what "Free usage
+ * exceeded, subscribe to Go" means. Point these at any other provider (see `config/providers.example.json`).
  */
 export const MODELS = {
-  'primary': 'opencode-go/crouton-alpha-free',
-  'fast': 'opencode-go/beam-free',
-  'jev': 'jev-1.13-free',
+  'primary': optionalEnv('MODEL_PRIMARY') ?? 'opencode-go/crouton-alpha-free',
+  'fast': optionalEnv('MODEL_FAST') ?? 'opencode-go/beam-free',
+  /** Bare id: Jev is called directly, not through opencode, so it has no provider prefix. */
+  'jev': optionalEnv('MODEL_JEV') ?? 'jev-1.13-free',
 } as const;
 
 /** Go is served separately from pay-as-you-go and the free tier; this is the endpoint the doctor probes. */
@@ -80,6 +87,15 @@ export const config = {
     all[id] = GuildConfigSchema.parse(value);
     mkdirSync(paths.config, { 'recursive': true });
     writeFileSync(`${paths.config}/guilds.json`, `${JSON.stringify(all, null, 2)}\n`);
+  },
+  /** Partial update that keeps the other guild keys, so `/model set` cannot drop `/enable`'s settings. */
+  'patchGuild': (id: string, patch: Record<string, unknown>): GuildSettings => {
+    const all = readGuilds();
+    const next = GuildConfigSchema.parse({ ...(all[id] ?? {}), ...patch });
+    all[id] = next;
+    mkdirSync(paths.config, { 'recursive': true });
+    writeFileSync(`${paths.config}/guilds.json`, `${JSON.stringify(all, null, 2)}\n`);
+    return next;
   },
 };
 

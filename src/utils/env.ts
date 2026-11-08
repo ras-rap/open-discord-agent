@@ -9,6 +9,9 @@ const optional = (key: string, ...aliases: string[]): string | undefined => {
   return undefined;
 };
 
+/** The provider registry resolves credentials from here, so `.env` stays the one place that is read. */
+export const optionalEnv = optional;
+
 export const NODE_ENV = optional('NODE_ENV') ?? 'development';
 export const IS_PRODUCTION = NODE_ENV === 'production';
 export const LOG_LEVEL = optional('LOG_LEVEL') ?? (IS_PRODUCTION ? 'info' : 'debug');

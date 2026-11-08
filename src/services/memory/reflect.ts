@@ -100,7 +100,7 @@ export async function reflectTurn(server: RunningServer, turn: Turn): Promise<nu
 
   try {
     const sessionId = await reflectSession(turn.guildId, server);
-    await server.opencode.prompt(sessionId, payload, models.fast());
+    await server.opencode.prompt(sessionId, payload, models.fast(turn.guildId));
     const deadline = Date.now() + 90_000;
     while (Date.now() < deadline) {
       if (!(await server.opencode.isBusy(sessionId).catch(() => false))) break;

@@ -33,16 +33,16 @@ describe('session policy', () => {
   });
 });
 
-describe('model allowlist', () => {
-  test('splits provider and model for allowed ids', () => {
+describe('model refs', () => {
+  test('splits provider and model for a role default', () => {
     expect(modelRef('opencode-go/crouton-alpha-free')).toEqual({
       'providerID': 'opencode-go',
       'modelID': 'crouton-alpha-free',
     });
   });
 
-  test('rejects any model outside the fixed list', () => {
-    expect(() => modelRef('opencode/gpt-6-luna')).toThrow(/not allowed/);
+  test('rejects a provider this deployment cannot reach', () => {
+    expect(() => modelRef('nonesuch/gpt-6-luna')).toThrow(/unknown provider/);
   });
 });
 

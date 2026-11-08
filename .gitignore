@@ -6,3 +6,4 @@ config/guilds.json
 .DS_Store
 logs/
 dist/
+config/providers.json

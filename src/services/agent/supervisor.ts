@@ -79,6 +79,8 @@ export class Supervisor {
         'BRIDGE_URL': `http://${config.bridge.host}:${config.bridge.port}/rpc`,
         'BRIDGE_TOKEN': workspace.bridgeToken,
         'BRIDGE_GUILD': guildId,
+        // The workspace config references credentials as `{env:…}`, so the credential the OAuth file holds
+        // has to be present in this process's environment — it is never written into the workspace itself.
         'OPENCODE_GO_API_KEY': consoleToken() ?? '',
       },
     });

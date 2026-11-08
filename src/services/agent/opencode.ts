@@ -75,6 +75,23 @@ export class Opencode {
       .join('');
   }
 
+  /**
+   * What this server can actually run: providers with a usable credential and the models it enumerated for
+   * them. `/model list` offers exactly this, so the menu cannot name a model the server would reject.
+   */
+  async catalog(): Promise<Array<{ id: string; name: string; models: string[] }>> {
+    const res = await this.client.config.providers();
+    const providers = res.data?.providers ?? [];
+    return providers
+      .map(provider => ({
+        'id': provider.id,
+        'name': provider.name,
+        'models': Object.keys(provider.models).sort(),
+      }))
+      .filter(provider => provider.models.length > 0)
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
   async replyPermission(requestID: string, reply: 'once' | 'always' | 'reject'): Promise<boolean> {
     const res = await fetch(`${this.baseUrl}/permission/${encodeURIComponent(requestID)}/reply`, {
       'method': 'POST',

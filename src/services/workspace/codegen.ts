@@ -1,3 +1,5 @@
+import { models } from '@services/agent/models.ts';
+import { providerConfigBlocks } from '@services/agent/providers.ts';
 import { capabilities, type ParamSpec } from '@services/bridge/capabilities.ts';
 import { MODELS } from '@services/config.ts';
 
@@ -58,17 +60,20 @@ ${tools}
 }
 
 /**
- * Workspace config for the pinned server. Its model catalogue already ships with `opencode-go` (crouton,
- * beam, ...), so the only thing to wire is the credential: the supervisor injects `OPENCODE_GO_API_KEY`
- * into each guild's server process, and that key is what selects the Go subscription instead of the free
- * tier — the absence of which produced "Free usage exceeded, subscribe to Go".
+ * Workspace config for the pinned server. The server's catalogue already knows most providers (openai,
+ * anthropic, openrouter, ...); a `provider` block only ever adds the credential or points at an endpoint, so
+ * what lands here is everything `config/providers.json` and `.env` resolve to. Credentials are `{env:NAME}`
+ * references: this file lives in a git repository that is committed every turn.
  */
-export function renderWorkspaceConfig(): string {
+export function renderWorkspaceConfig(guildId?: string): string {
+  const blocks = providerConfigBlocks(models.providerIds(guildId));
+
   return `${JSON.stringify(
     {
       '$schema': 'https://opencode.ai/config.json',
       'model': MODELS.primary,
-      'provider': { 'opencode-go': { 'options': { 'apiKey': '{env:OPENCODE_GO_API_KEY}' } } },
+      'small_model': MODELS.fast,
+      'provider': blocks,
       'permission': {
         // Inside repo/ the agent may write freely: that is the code sandbox, every turn is git-committed, and
         // /undo reverts it. Control files stay denied; everything else asks a human.

@@ -12,6 +12,7 @@ import { reflectTurn, worthReflecting } from '@services/memory/reflect.ts';
 import { tierOf } from '@services/policy/gate.ts';
 import { log } from '@utils/logger.ts';
 
+import { diagnosisCode, failureText } from './errors.ts';
 import {
   isDelta,
   isIdle,
@@ -29,6 +30,10 @@ import type { Client, GuildMember, TextChannel } from 'discord.js';
 
 const logger = log('runtime');
 const IDLE_TIMEOUT_MS = 15 * 60_000;
+/** `/model list` and autocomplete share one catalogue per guild; a restart of the server invalidates it. */
+const CATALOG_TTL_MS = 60_000;
+
+export type CatalogProvider = { id: string; name: string; models: string[] };
 
 type Stream = {
   renderer: StreamRenderer;
@@ -54,6 +59,7 @@ export type AskInput = {
 export class Runtime {
   private readonly streams = new Map<string, Stream>();
   private readonly queues = new Map<string, Promise<unknown>>();
+  private readonly catalogs = new Map<string, { at: number; providers: CatalogProvider[] }>();
 
   constructor(
     private readonly client: Client,
@@ -67,6 +73,16 @@ export class Runtime {
     this.queues.set(chatKey, next);
     try {
       await next;
+    } catch (error) {
+      // Anything thrown before the stream exists (a workspace that cannot provision, a provider block the
+      // server rejects) would otherwise vanish into an unhandled rejection with no message in the channel.
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('prompt could not start', {
+        chatKey,
+        'code': diagnosisCode(message),
+        'error': message.slice(0, 300),
+      });
+      await input.channel.send({ 'content': `⚠️ ${failureText(message)}`.slice(0, 1990) }).catch(() => undefined);
     } finally {
       if (this.queues.get(chatKey) === next) this.queues.delete(chatKey);
     }
@@ -97,7 +113,7 @@ export class Runtime {
       memoryContext(input.guildId, input.text);
 
     try {
-      await server.opencode.prompt(sessionId, prompt, models.primary());
+      await server.opencode.prompt(sessionId, prompt, models.primary(input.guildId));
       const timeout = setTimeout(() => {
         logger.warn('prompt timed out', { chatKey, sessionId });
         idle.resolve();
@@ -125,8 +141,8 @@ export class Runtime {
         })();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.error('prompt failed', { chatKey, 'error': message.slice(0, 300) });
-      await renderer.fail(message);
+      logger.error('prompt failed', { chatKey, 'code': diagnosisCode(message), 'error': message.slice(0, 300) });
+      await renderer.fail(failureText(message));
     } finally {
       this.streams.delete(sessionId);
       cancelApprovalsForSession(sessionId);
@@ -265,5 +281,30 @@ export class Runtime {
 
   activeStreams(): number {
     return this.streams.size;
+  }
+
+  /**
+   * Provider/model catalogue for this guild. `spawn: false` is what autocomplete uses: it only reads a warm
+   * server, because a keyboard interaction must not wait on a cold opencode start.
+   */
+  async catalog(guildId: string, guildName: string, options: { spawn?: boolean } = {}): Promise<CatalogProvider[]> {
+    const cached = this.catalogs.get(guildId);
+    if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.providers;
+
+    const server =
+      options.spawn === false ? this.supervisor.get(guildId) : await this.supervisor.ensure(guildId, guildName);
+    if (!server) return [];
+
+    const providers = await server.opencode.catalog().catch(error => {
+      logger.warn('catalog unavailable', { guildId, 'error': String(error).slice(0, 160) });
+      return [] as CatalogProvider[];
+    });
+    if (providers.length > 0) this.catalogs.set(guildId, { 'at': Date.now(), 'providers': providers });
+    return providers;
+  }
+
+  /** Called when the guild's model or provider wiring changes, so the next prompt re-provisions and re-reads. */
+  forgetCatalog(guildId: string): void {
+    this.catalogs.delete(guildId);
   }
 }

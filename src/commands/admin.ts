@@ -1,4 +1,6 @@
 import { guildEnabled, guildOnly, ownerOnly } from '@guards/index.ts';
+import { effectiveModel, models } from '@services/agent/models.ts';
+import { readyProviderIds } from '@services/agent/providers.ts';
 import { config } from '@services/config.ts';
 import { audit, approvals, sessions } from '@services/database/sqlite.ts';
 import { services } from '@services/discord/services.ts';
@@ -24,6 +26,9 @@ export class AdminCommand {
       .map(entry => `guild ${entry.guildId} · port ${entry.port} · idle ${entry.idleMinutes}m`)
       .join('\n');
     const recent = interaction.guildId ? audit.recent(interaction.guildId, 3) : [];
+    const primary = effectiveModel('primary', interaction.guildId ?? '');
+    const fast = effectiveModel('fast', interaction.guildId ?? '');
+    const providers = readyProviderIds();
     const embed = new EmbedBuilder()
       .setTitle('open-discord-agent')
       .setColor(BRAND_COLOR)
@@ -42,6 +47,14 @@ export class AdminCommand {
         },
         { 'name': 'policy', 'value': `jev=${config.jevMode}`, 'inline': true },
         {
+          'name': 'models',
+          'value':
+            `primary \`${primary.id}\` (${primary.source})\n` +
+            `fast \`${fast.id}\` (${fast.source})\n` +
+            `providers: ${providers.join(', ') || 'none'}`,
+          'inline': false,
+        },
+        {
           'name': 'gateway',
           'value': `${Math.round(interaction.client.ws.ping)}ms · pid ${process.pid}`,
           'inline': true,
@@ -52,7 +65,7 @@ export class AdminCommand {
           'inline': false,
         },
       )
-      .setFooter({ 'text': 'models: crouton-alpha-free · beam-free · jev-1.13-free' });
+      .setFooter({ 'text': `/model current for details · jev ${models.jev}` });
     await interaction.reply({ 'embeds': [embed], 'flags': EPHEMERAL });
   }
 

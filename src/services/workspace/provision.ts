@@ -31,7 +31,7 @@ export function provisionWorkspace(guildId: string, guildName: string): Provisio
   mkdirSync(resolve(dir, 'repo'), { 'recursive': true });
 
   const changed: string[] = [];
-  if (writeIfChanged(resolve(dir, 'opencode.json'), renderWorkspaceConfig())) changed.push('opencode.json');
+  if (writeIfChanged(resolve(dir, 'opencode.json'), renderWorkspaceConfig(guildId))) changed.push('opencode.json');
   if (writeIfChanged(resolve(dir, 'AGENTS.md'), renderAgentsFile(guildName))) changed.push('AGENTS.md');
   if (writeIfChanged(resolve(dir, '.opencode/tools/discord.ts'), renderDiscordToolFile())) changed.push('discord.ts');
   // Code under repo/ must be tracked: edits there are click-free precisely because every turn is committed and

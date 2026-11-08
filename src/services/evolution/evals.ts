@@ -31,7 +31,7 @@ export async function replay(server: RunningServer, fixture: Fixture): Promise<R
   server.opencode.subscribe(event => events.push(event), controller.signal);
 
   const session = await server.opencode.createSession(`eval:${fixture.name}`);
-  await server.opencode.prompt(session, fixture.prompt, models.primary());
+  await server.opencode.prompt(session, fixture.prompt, models.primary(server.guildId));
 
   const deadline = Date.now() + FIXTURE_TIMEOUT_MS;
   while (Date.now() < deadline) {
