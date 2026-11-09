@@ -1,8 +1,44 @@
 {
   "123456789012345678": {
     "enabled": true,
-    "shell": { "mode": "docker", "image": "debian:bookworm-slim", "fallback": "error" },
-    "roles": { "admin": ["111111111111111111"], "trusted": ["222222222222222222"] },
-    "model": { "primary": "opencode-go/gpt-5.6-luna" }
+    "shell": {
+      "mode": "docker",
+      "image": "debian:bookworm-slim",
+      "fallback": "error"
+    },
+    "roles": {
+      "admin": [
+        "111111111111111111"
+      ],
+      "trusted": [
+        "222222222222222222"
+      ]
+    },
+    "model": {
+      "primary": "opencode-go/gpt-5.6-luna"
+    },
+    "policy": {
+      "mode": "vibe",
+      "matrix": {
+        "member": {
+          "reversible": "deny"
+        },
+        "trusted": {
+          "destructive": "deny"
+        }
+      },
+      "tools": {
+        "deny": [
+          "member_ban"
+        ],
+        "allow": []
+      },
+      "vibe": {
+        "maxRisk": "reversible",
+        "screen": "enforce",
+        "minApproval": 0.5,
+        "askOnUncertain": true
+      }
+    }
   }
 }

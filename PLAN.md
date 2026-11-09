@@ -231,6 +231,14 @@ No `@typesafe-ai/sdk` dependency: the endpoint is plain JSON, and the SDK assume
 
 ## 4. Permission system — five layers, fail closed
 
+The ceiling table is now *data*: `policy.matrix.<rank>.<risk>` overrides any single cell per guild, and
+`policy.mode` picks what an `ask` becomes — a card (`ask`), a Jev-screened run (`vibe`), or a refusal above
+`read` (`locked`). Settings are scope-checked in `policy/settings.ts`: sandbox, the matrix, tool allow-lists and
+role lists are bot-owner only, so a guild admin cannot widen what the agent may do. Vibe's verdict is a pure
+function (`vibeVerdict`) calibrated against real readings: catastrophic refuses; a destructive reading needs the
+approval floor whatever the class; destructive-class calls need a margin above it; an unconfident "safe"
+reading asks.
+
 ```mermaid
 flowchart TD
   A["1 · identity: guild allowlist, channel enablement, role → tier<br/>owner > admin > trusted > member > guest"] --> B

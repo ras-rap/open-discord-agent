@@ -169,6 +169,8 @@ Path aliases (`@services/*`, `@utils/*`, `@guards/*`, `@cli/*`, `@/*`) come from
 | `/model current` | roles, their source, and which providers are ready |
 | `/model list [filter]` | every model this server can run |
 | `/model set model:<id> [role]` · `/model reset [role]` | switch or drop a guild's model (admin) |
+| `/vibe on\|off` | run tool calls without approval cards, Jev screening the dangerous ones (admin) |
+| `/config show` · `/config set <key> <value>` · `/config reset <key>` | permissions, sandbox, models and policy — scope-checked (admin, or bot owner for the dangerous keys) |
 | `/new` | fresh opencode session for this channel |
 | `/abort` | interrupt the running task |
 | `/status` | servers, sessions, approvals, sandbox, policy, models, gateway, recent decisions |
@@ -256,6 +258,8 @@ and a database snapshot every 24 h.
 
 ## Policy
 
+Default ceilings — every cell is overridable per guild with `/config set policy.matrix.<rank>.<risk>`:
+
 | Rank | read | reversible | destructive | admin |
 | --- | --- | --- | --- | --- |
 | owner / guild owner | allow | allow | allow | allow |
@@ -263,6 +267,52 @@ and a database snapshot every 24 h.
 | trusted (config role) | allow | allow | ask | deny |
 | member | allow | ask | deny | deny |
 | guest / DM | allow | deny | deny | deny |
+
+### Modes
+
+| `policy.mode` | What a call the ceiling does not allow outright does |
+| --- | --- |
+| `ask` (default) | posts an approval card and waits for a human |
+| `vibe` | runs it — Jev reads the call first and vetoes what looks dangerous |
+| `locked` | refuses everything above `read`, whatever the rank says |
+
+`/vibe on|off` is the one-word switch for `vibe`; `/config set policy.mode …` does the same and reaches the rest.
+
+**Vibe is "run it unless it looks dangerous", not "run anything".** A rank ceiling that says `deny` still
+denies — vibe removes the *approval step* for people already entitled, it never promotes anyone. Then, per
+call, Jev is asked how destructive it is and whether an admin would approve:
+
+| Jev reading | Vibe does |
+| --- | --- |
+| `catastrophic` | refuses, whatever the rank or score |
+| `destructive` with approval below `policy.vibe.minApproval` (0.4) | refuses — the sandbox does not make `rm -rf` fine |
+| destructive-class call Jev rates reversible/destructive | needs `minApproval + 0.2`, because Jev reads coarse classes loosely (a `permission_set Administrator` came back "reversible" at 0.45) |
+| destructive-class call Jev calls `read_only` with low confidence | asks a human — an unconfident "it's safe" is not a green light for a delete |
+| anything above `policy.vibe.maxRisk` | asks a human |
+| Jev unreachable | asks, unless `policy.vibe.askOnUncertain` is false |
+| otherwise | runs it |
+
+The agent server's own permission asks (`bash`, `edit` outside `repo/`, `webfetch`) go through the same screen,
+and a shell call is classed reversible inside the docker sandbox but destructive in `host` mode. Real readings
+from a vibe-mode test: `message_send` allow (Jev: reversible, 0.67), `channel_delete` deny (destructive, 0.24),
+`permission_set Administrator` deny (0.45), `bash bun test` allow, `bash rm -rf /` deny (catastrophic),
+`edit /etc/passwd` ask (an unconfident "safe" reading).
+
+### `/config` — everything that is configurable
+
+`/config show` prints the mode, the effective rank table (with `*` on cells this guild overrides), the sandbox,
+the models, and how many keys *you* may change. `/config set <key> <value>` and `/config reset <key>` are
+scope-checked before anything is written:
+
+| Scope | Keys |
+| --- | --- |
+| guild admin | `policy.mode`, `policy.vibe.maxRisk|screen|minApproval|askOnUncertain`, `policy.tools.deny`, `model.primary`, `model.fast` |
+| **bot owner only** | `shell.mode` (`host` runs shell calls as the bot user), `shell.image`, `shell.fallback`, `policy.tools.allow` (bypasses the card for everyone), `policy.matrix.*` (20 cells), `roles.admin`, `roles.trusted`, `enabled` |
+
+So a guild admin can make the bot chattier or stricter, but cannot turn the sandbox off, grant themselves a
+capability, rewrite the rank table, or widen what bypasses approval — those need `OWNER_ID` in `.env`.
+`/config reset` restores the schema default exactly (empty containers included), and every value is validated
+before the write, so a typo leaves the file untouched.
 
 Models run wherever `.env` points them. The default is the **OpenCode Go** subscription: provider
 `opencode-go`, base URL `https://opencode.ai/inference/go`, authenticated with a Console API key (`oc_sk_...`)

@@ -9,7 +9,7 @@ import { StreamRenderer } from '@services/discord/render.ts';
 import { commitWorkspace } from '@services/evolution/skills.ts';
 import { memoryContext, writeDigest } from '@services/memory/inject.ts';
 import { reflectTurn, worthReflecting } from '@services/memory/reflect.ts';
-import { tierOf } from '@services/policy/gate.ts';
+import { screenPermission, tierOf } from '@services/policy/gate.ts';
 import { optionalEnv } from '@utils/env.ts';
 import { log } from '@utils/logger.ts';
 
@@ -298,6 +298,31 @@ export class Runtime {
     }
     const patterns = event.properties.patterns.join(', ');
     const always = event.properties.always?.join(', ');
+    const stream = this.streams.get(event.properties.sessionID);
+
+    // In vibe mode the server's own permission asks are screened too — otherwise an unattended guild would
+    // still stop on every `bash`/`edit`, which is the opposite of the point.
+    const actor = this.client.guilds.cache.get(guildId)?.members.cache.get(session.actor_id ?? '') ?? null;
+    const tier = tierOf(guildId, actor);
+    const screen = await screenPermission({
+      guildId,
+      tier,
+      'permission': event.properties.permission,
+      'patterns': event.properties.patterns,
+    });
+    if (screen.verdict !== 'ask') {
+      const reply = screen.verdict === 'allow' ? 'once' : 'reject';
+      const ok = await server.opencode.replyPermission(event.properties.id, reply);
+      logger.info('permission auto-answered', {
+        'requestID': event.properties.id,
+        reply,
+        'reason': screen.reason,
+        'delivered': ok,
+      });
+      if (screen.verdict === 'allow') stream?.renderer.setStatus(`😎 vibe: ${event.properties.permission} allowed`);
+      return;
+    }
+
     const outcome = await requestApproval({
       'client': this.client,
       guildId,

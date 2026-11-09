@@ -45,7 +45,11 @@ export class AdminCommand {
           'value': `shell=${shell.mode} · docker=${shell.docker ? 'up' : `down: ${shell.detail.slice(0, 80)}`}`,
           'inline': true,
         },
-        { 'name': 'policy', 'value': `jev=${config.jevMode}`, 'inline': true },
+        {
+          'name': 'policy',
+          'value': `mode=${config.policy(interaction.guildId ?? '').mode} · jev=${config.jevMode}`,
+          'inline': true,
+        },
         {
           'name': 'models',
           'value':
