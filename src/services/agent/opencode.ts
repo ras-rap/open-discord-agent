@@ -76,6 +76,20 @@ export class Opencode {
   }
 
   /**
+   * The model's chain of thought for the last answer. The pinned server does not stream reasoning as deltas —
+   * it publishes them as `reasoning` parts — so the log reads them back here.
+   */
+  async lastReasoning(sessionID: string): Promise<string> {
+    const res = await this.client.session.messages({ 'path': { 'id': sessionID } });
+    const assistant = [...(res.data ?? [])].reverse().find(entry => entry.info.role === 'assistant');
+    return (assistant?.parts ?? [])
+      .filter(part => part.type === 'reasoning')
+      .map(part => ('text' in part ? part.text : ''))
+      .join('\n\n')
+      .trim();
+  }
+
+  /**
    * What this server can actually run: providers with a usable credential and the models it enumerated for
    * them. `/model list` offers exactly this, so the menu cannot name a model the server would reject.
    */

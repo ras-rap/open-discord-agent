@@ -19,6 +19,7 @@ import {
   isIdle,
   isPermissionAsked,
   isQuestionAsked,
+  isReasoningPart,
   isRetry,
   isToolPart,
   type AgentEvent,
@@ -52,6 +53,8 @@ type Stream = {
   /** Re-armed on every event for this session; fires after `IDLE_TIMEOUT_MS` of silence. */
   watchdog?: Timer;
   timedOut: boolean;
+  /** Part ids already written to the log, so a tool that reports several updates is listed once. */
+  logged: Set<string>;
 };
 
 export type AskInput = {
@@ -118,7 +121,13 @@ export class Runtime {
     await renderer.start();
 
     const idle = Promise.withResolvers<void>();
-    const stream: Stream = { renderer, 'resolve': idle.resolve, 'toolCalls': [], 'timedOut': false };
+    const stream: Stream = {
+      renderer,
+      'resolve': idle.resolve,
+      'toolCalls': [],
+      'timedOut': false,
+      'logged': new Set(),
+    };
     this.streams.set(sessionId, stream);
 
     const rank = ['guest', 'member', 'trusted', 'admin', 'owner'][tierOf(input.guildId, input.member)];
@@ -133,8 +142,10 @@ export class Runtime {
 
       if (stream.timedOut) await this.recoverSession(server, chatKey, sessionId);
       const finalText = await server.opencode.lastText(sessionId).catch(() => '');
+      const reasoning = await server.opencode.lastReasoning(sessionId).catch(() => '');
       await renderer.finish(finalText, {
         'mentionId': input.actorId,
+        reasoning,
         ...(stream.timedOut
           ? {
               'note':
@@ -211,10 +222,20 @@ export class Runtime {
       stream.renderer.push(event.properties.delta);
       return;
     }
+    if (stream && isReasoningPart(event)) {
+      stream.renderer.setReasoning(event.properties.part.id, event.properties.part.text);
+      return;
+    }
     if (stream && isToolPart(event)) {
       const part = event.properties.part;
+      const status = part.state?.status ?? 'running';
       stream.toolCalls.push({ 'tool': part.tool ?? 'tool', 'status': part.state?.status, 'input': part.state?.input });
-      stream.renderer.setStatus(`🔧 ${part.tool ?? 'tool'} · ${part.state?.status ?? 'running'}`);
+      stream.renderer.setStatus(`🔧 ${part.tool ?? 'tool'} · ${status}`);
+      // One log line per tool call, at the first terminal status.
+      if ((status === 'completed' || status === 'error') && !stream.logged.has(part.id)) {
+        stream.logged.add(part.id);
+        stream.renderer.addStep(part.tool ?? 'tool', status);
+      }
       return;
     }
     if (stream && isRetry(event)) {

@@ -40,11 +40,15 @@ export function chunkMessage(text: string, limit = LIMIT): string[] {
   return chunks.filter(chunk => chunk.length > 0);
 }
 
+const MAX_LOG_STEPS = 20;
+
 /**
- * One live Discord message that follows a running prompt: text deltas are coalesced to at most one edit per
- * interval and tool activity shows as a status line. When the turn ends the preview is deleted and the answer
- * is posted as its own message — the preview is scratch space for progress, not part of the transcript, so all
- * of its tool lines disappear with it and the answer can ping whoever asked.
+ * One live Discord message per turn. While the prompt runs it is edited at most once per interval and shows
+ * the partial answer, the current tool call, and the model's thinking as it is published.
+ *
+ * When the turn ends it stays in the channel as the turn's **log**: elapsed time, what the agent did, and its
+ * chain of thought. The answer itself goes out as a separate message so it can ping whoever asked — the log is
+ * the working record, the answer is the reply.
  */
 export class StreamRenderer {
   private buffer = '';
@@ -52,6 +56,12 @@ export class StreamRenderer {
   private message?: Message;
   private timer?: Timer;
   private closed = false;
+  /** Terminal tool calls, in order, for the log. */
+  private readonly steps: string[] = [];
+  /** Reasoning parts keyed by part id: the server re-publishes a part as it grows, so the latest wins. */
+  private readonly reasoning = new Map<string, string>();
+  private readonly startedAt = Date.now();
+  private elapsed = 0;
 
   constructor(
     private readonly channel: TextChannel,
@@ -62,11 +72,57 @@ export class StreamRenderer {
     this.message = await this.channel.send({ 'content': this.preview });
   }
 
+  private thinkingText(): string {
+    return [...this.reasoning.values()]
+      .join('\n\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
   private get content(): string {
     const status = this.status ? `\n\n> ${this.status}` : '';
     const body = this.buffer.length > 1500 ? `…${this.buffer.slice(-1500)}` : this.buffer;
     const composed = `${body}${status}`.trim();
-    return composed.length > 0 ? composed.slice(0, LIMIT) : this.preview;
+    if (composed.length > 0) return composed.slice(0, LIMIT);
+    // No answer text yet: show the thinking as it arrives, which is the only visible progress during a long
+    // reasoning pass (the server publishes reasoning as parts, never as text deltas).
+    const thinking = this.thinkingText();
+    if (thinking.length === 0) return this.preview;
+    const tail = thinking.length > 700 ? `…${thinking.slice(-700)}` : thinking;
+    return `🧠 thinking…\n\n> ${tail.split('\n').join('\n> ')}`.slice(0, LIMIT);
+  }
+
+  /** Called on every terminal tool call: the log lists what happened, not each status transition. */
+  addStep(tool: string, status: string): void {
+    this.steps.push(`${status === 'error' ? '✗' : '✓'} \`${tool}\``);
+    if (this.steps.length > MAX_LOG_STEPS) this.steps.shift();
+    this.schedule();
+  }
+
+  setReasoning(partId: string, text: string): void {
+    this.reasoning.set(partId, text);
+    this.schedule();
+  }
+
+  /**
+   * The finished log: header, steps, then the chain of thought as a blockquote. Discord caps a message at 2000
+   * characters, so the thinking is what gets trimmed — steps are the part that answers "what did it do".
+   */
+  private logContent(note?: string): string {
+    const seconds = Math.max(1, Math.round(this.elapsed / 1000));
+    const header = `🧠 log · ${seconds}s · ${this.steps.length} step${this.steps.length === 1 ? '' : 's'}`;
+    const parts = note ? [note, header] : [header];
+    if (this.steps.length > 0) parts.push(this.steps.join('\n'));
+
+    const thinking = this.thinkingText();
+    if (thinking.length > 0) {
+      const used = parts.join('\n').length;
+      const budget = LIMIT - used - 16;
+      const quoted = thinking.length > budget ? `…${thinking.slice(-budget)}` : thinking;
+      parts.push(`> ${quoted.split('\n').join('\n> ')}`);
+    }
+
+    return parts.join('\n\n').slice(0, LIMIT);
   }
 
   private stop(): void {
@@ -103,33 +159,49 @@ export class StreamRenderer {
    * Posts the answer as a new message (`mentionId` pings the asker on the first chunk) and deletes the
    * progress preview. `note` is prepended — it is how a timeout explains itself above the partial output.
    */
-  async finish(finalText: string, options: { mentionId?: string; note?: string } = {}): Promise<void> {
+  async finish(
+    finalText: string,
+    options: { mentionId?: string; note?: string; reasoning?: string } = {},
+  ): Promise<void> {
+    this.elapsed = Date.now() - this.startedAt;
+    // The session is authoritative: live parts are provisional prefixes, so they are replaced, not appended.
+    if (options.reasoning) {
+      this.reasoning.clear();
+      this.reasoning.set('final', options.reasoning);
+    }
     this.closed = true;
     this.stop();
+
     const body = [options.note, finalText.trim() || this.buffer.trim() || '(no output)'].filter(Boolean).join('\n\n');
     const prefix = options.mentionId ? `<@${options.mentionId}> ` : '';
     const chunks = chunkMessage(body, prefix.length > 0 ? LIMIT - MENTION_RESERVE : LIMIT);
-    // Post first, then drop the preview: a failed send must not leave the channel with the progress message
-    // deleted and no answer at all.
+    // Post first, then rewrite the preview: a failed send must not leave the channel with the log and no answer.
     for (const [index, chunk] of chunks.entries())
       await this.channel.send({ 'content': `${index === 0 ? prefix : ''}${chunk}`.slice(0, LIMIT) });
-    await this.dropPreview();
+    await this.publishLog(options.note);
   }
 
-  /** Keeps the preview and turns it into the error: the asker is looking at it, so it is the place to answer. */
+  /**
+   * The failure goes where the asker is looking — the live message — with the steps it had managed, so the log
+   * of a failed turn still says what the agent was doing when it broke.
+   */
   async fail(text: string, options: { mentionId?: string } = {}): Promise<void> {
+    this.elapsed = Date.now() - this.startedAt;
     this.closed = true;
     this.stop();
     const mention = options.mentionId ? `<@${options.mentionId}> ` : '';
-    const content = `${mention}⚠️ ${text}`.slice(0, LIMIT);
+    const steps = this.steps.length > 0 ? `\n\n> ${this.steps.join('\n> ')}` : '';
+    const content = `${mention}⚠️ ${text}${steps}`.slice(0, LIMIT);
     if (!this.message) await this.channel.send({ 'content': content });
     else await this.message.edit({ 'content': content }).catch(() => undefined);
   }
 
-  private async dropPreview(): Promise<void> {
-    if (!this.message) return;
-    const preview = this.message;
-    this.message = undefined;
-    await preview.delete().catch(() => undefined);
+  private async publishLog(note?: string): Promise<void> {
+    const log = this.logContent(note);
+    if (!this.message) {
+      await this.channel.send({ 'content': log }).catch(() => undefined);
+      return;
+    }
+    this.message = await this.message.edit({ 'content': log }).catch(() => this.message);
   }
 }

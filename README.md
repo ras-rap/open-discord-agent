@@ -188,10 +188,13 @@ Mentioning the bot or replying to one of its messages also starts a task.
 
 ### What a turn looks like in the channel
 
-1. one message says `🧠 thinking…` and is edited in place as the answer streams — that is where tool activity
-   shows, so the channel never fills with tool chatter;
-2. when the turn ends that message is **deleted** and the answer is posted as its **own message that pings
-   whoever asked** (long answers continue in follow-up chunks, mention on the first only);
+1. one message says `🧠 thinking…` and is edited in place — the partial answer, the current tool call, and the
+   model's reasoning as it is published — so the channel never fills with tool chatter;
+2. when the turn ends that message stays as the turn's **log** (`🧠 log · 42s · 3 steps`, the tool calls in
+   order, then the chain of thought as a quote) and the answer is posted as its **own message that pings
+   whoever asked** (long answers continue in follow-up chunks, mention on the first only). Reasoning only
+   appears for models that publish reasoning parts; a model that answers straight from context logs its steps
+   alone;
 3. approval cards are removed the moment they are decided, expired, or the turn ends — the record stays in
    `/audit` instead of in the channel;
 4. a turn is abandoned only after `IDLE_TIMEOUT_MS` (10 min) of **silence** — continuous streaming or tool
@@ -332,6 +335,7 @@ the command that fixes it (`src/services/agent/errors.ts`), and the cause is log
 | `Unknown interaction` (10062), or commands answer "The application did not respond" | the gateway delivered the interaction after Discord's 3s window — usually a second process on the same token (the lock file blocks that) or a paused host; `/ping` reports interaction latency, gateway ping and pid |
 | the agent says "question · running" and nothing arrives | it used opencode's `question` tool; the card should be posted in the channel (answer buttons or a select). If it is missing, check the bot log for `could not post question card` |
 | approvals never appear | check `/status` → `policy`; the event name is `permission.asked` (not `permission.updated`) |
+| the log shows `0 steps` and no thinking | that turn used no tools and the model published no reasoning part — not an error |
 | a turn says `⏱️ interrupted after 10 min without output` | the provider stopped emitting events; the session was aborted and a fresh one bound to the channel, so the next message runs normally. Raise `IDLE_TIMEOUT_MS` if your runtime is just slow |
 | an answer arrives but pings nobody | the requester must still be in the channel — the mention is `<@id>` on the first chunk of the answer |
 | commands appear twice | deploy once per scope: `bun run commands deploy --guild` clears the global set, `--global` clears the guild copy |

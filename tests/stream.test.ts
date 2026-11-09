@@ -4,12 +4,10 @@ import { describe, expect, test } from 'bun:test';
 
 import type { Client, Message, TextChannel } from 'discord.js';
 
-type Sent = string;
-
-/** Minimal TextChannel: records sends and the one live message the renderer edits or deletes. */
+/** Minimal TextChannel: records sends and the one live message the renderer edits. */
 const fakeChannel = () => {
-  const sent: Sent[] = [];
-  const state = { 'edited': [] as Sent[], 'deleted': 0 };
+  const sent: string[] = [];
+  const state = { 'edited': [] as string[], 'deleted': 0 };
   const message = {
     'content': '',
     'edit': async (payload: { content: string }) => {
@@ -34,16 +32,59 @@ const fakeChannel = () => {
 };
 
 describe('stream renderer', () => {
-  test('the answer is a new message that pings the asker, and the preview is removed', async () => {
-    const { channel, sent, state } = fakeChannel();
+  test('the answer is a new message that pings the asker', async () => {
+    const { channel, sent } = fakeChannel();
     const renderer = new StreamRenderer(channel, '🧠 thinking…');
     await renderer.start();
     renderer.push('draft text');
     await renderer.finish('the real answer', { 'mentionId': 'user-7' });
 
-    expect(state.deleted).toBe(1);
     expect(sent).toEqual(['🧠 thinking…', '<@user-7> the real answer']);
-    expect(state.edited).toEqual([]);
+  });
+
+  test('the live message survives the turn as a log of steps and thinking', async () => {
+    const { channel, state } = fakeChannel();
+    const renderer = new StreamRenderer(channel, '🧠 thinking…');
+    await renderer.start();
+    renderer.addStep('channels_list', 'completed');
+    renderer.addStep('bash', 'error');
+    renderer.setReasoning('p1', 'first thought');
+    renderer.setReasoning('p1', 'first thought, extended');
+    await renderer.finish('the answer', { 'mentionId': 'user-7', 'reasoning': 'authoritative reasoning' });
+
+    const log = state.edited.at(-1) ?? '';
+    expect(state.deleted).toBe(0);
+    expect(log).toContain('🧠 log');
+    expect(log).toContain('2 steps');
+    expect(log).toContain('✓ `channels_list`');
+    expect(log).toContain('✗ `bash`');
+    expect(log).toContain('> authoritative reasoning');
+    // The live reasoning was a prefix of the authoritative part, so it must not be duplicated.
+    expect(log).not.toContain('first thought, extended');
+  });
+
+  test('a turn with no tool calls still logs its thinking', async () => {
+    const { channel, state } = fakeChannel();
+    const renderer = new StreamRenderer(channel, '🧠 thinking…');
+    await renderer.start();
+    await renderer.finish('42', { 'reasoning': 'nine sheep survive' });
+
+    const log = state.edited.at(-1) ?? '';
+    expect(log).toContain('0 steps');
+    expect(log).toContain('> nine sheep survive');
+  });
+
+  test('a long chain of thought is trimmed to fit one Discord message', async () => {
+    const { channel, state } = fakeChannel();
+    const renderer = new StreamRenderer(channel, '🧠 thinking…');
+    await renderer.start();
+    for (let index = 0; index < 12; index += 1) renderer.addStep(`tool_${index}`, 'completed');
+    await renderer.finish('answer', { 'reasoning': 'thought '.repeat(800) });
+
+    const log = state.edited.at(-1) ?? '';
+    expect(log.length).toBeLessThanOrEqual(1990);
+    expect(log).toContain('✓ `tool_11`');
+    expect(log).toContain('…');
   });
 
   test('a timeout note is explained above the partial output, still mentioning the asker', async () => {
@@ -69,14 +110,17 @@ describe('stream renderer', () => {
     expect(answer.slice(1).every(chunk => !chunk.includes('<@user-7>'))).toBe(true);
   });
 
-  test('a failure keeps the preview it edited, and mentions the asker there', async () => {
+  test('a failure keeps the live message, mentions the asker, and shows what it had done', async () => {
     const { channel, sent, state } = fakeChannel();
     const renderer = new StreamRenderer(channel, '🧠 thinking…');
     await renderer.start();
+    renderer.addStep('message_send', 'completed');
     await renderer.fail('**the provider rejected the credential**', { 'mentionId': 'user-7' });
 
     expect(state.deleted).toBe(0);
-    expect(state.edited.at(-1)).toBe('<@user-7> ⚠️ **the provider rejected the credential**');
+    const shown = state.edited.at(-1) ?? '';
+    expect(shown.startsWith('<@user-7> ⚠️ **the provider rejected the credential**')).toBe(true);
+    expect(shown).toContain('✓ `message_send`');
     expect(sent).toHaveLength(1);
   });
 
@@ -98,6 +142,7 @@ describe('turn watchdog', () => {
       },
       'abort': async () => void calls.push('abort'),
       'lastText': async () => 'partial answer',
+      'lastReasoning': async () => '',
       'isBusy': async () => false,
       'createSession': async () => 'ses_timeout',
     };
@@ -118,10 +163,10 @@ describe('turn watchdog', () => {
     });
 
     expect(calls).toEqual(['prompt', 'abort']);
-    expect(state.deleted).toBe(1);
     const answer = sent.at(-1) ?? '';
     expect(answer.startsWith('<@user-7> ')).toBe(true);
     expect(answer).toContain('interrupted');
     expect(answer).toContain('partial answer');
+    expect(state.edited.at(-1) ?? '').toContain('🧠 log');
   });
 });

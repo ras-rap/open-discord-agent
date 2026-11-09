@@ -66,6 +66,11 @@ export function isDelta(event: AgentEvent): event is DeltaEvent {
   return event.type === 'message.part.delta' && typeof (event as DeltaEvent).properties?.delta === 'string';
 }
 
+/** Reasoning arrives as a whole part, not as deltas, and is re-published as it grows. */
+export function isReasoningPart(event: AgentEvent): event is PartEvent & { properties: { part: { text: string } } } {
+  return event.type === 'message.part.updated' && (event as PartEvent).properties?.part?.type === 'reasoning';
+}
+
 export function isToolPart(event: AgentEvent): event is PartEvent {
   return event.type === 'message.part.updated' && (event as PartEvent).properties?.part?.type === 'tool';
 }

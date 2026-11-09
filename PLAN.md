@@ -176,7 +176,7 @@ sequenceDiagram
   O-->>B: message.part.delta → coalesced edits of one progress message
   O->>B: permission.asked → embed + buttons → /permission/{id}/reply
   O->>B: tool parts (discord_*) → bridge → gate → docker/discord
-  O-->>B: session.idle → progress message deleted, answer posted as a new message that pings the asker
+  O-->>B: session.idle → live message becomes the turn log (steps + chain of thought), answer posted as a new message that pings the asker
   Note over B,O: silence > IDLE_TIMEOUT_MS → abort, chat rebound to a fresh session, partial output reported
   B->>M: reflect (beam-free) → facts/lessons/outcome
 ```
