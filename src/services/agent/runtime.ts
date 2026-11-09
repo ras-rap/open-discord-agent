@@ -1,4 +1,4 @@
-import { sessions } from '@services/database/sqlite.ts';
+import { audit, sessions } from '@services/database/sqlite.ts';
 import { cancelApprovalsForSession, requestApproval } from '@services/discord/approvals.ts';
 import {
   cancelQuestion,
@@ -36,6 +36,13 @@ const logger = log('runtime');
  * server that has gone quiet is. A fixed whole-turn deadline used to abandon work that was still progressing.
  * Overridable because a slow local runtime may legitimately need a longer window.
  */
+/**
+ * A turn that ends on a failed tool call is usually a turn that did not finish the job: the model announces the
+ * work, one call errors, and it stops. Instead of posting that promise as the answer, the same session is
+ * prompted again with the failure in hand — bounded, so a genuinely impossible task still ends.
+ */
+const MAX_CONTINUATIONS = 2;
+
 const configuredSilence = Number(optionalEnv('IDLE_TIMEOUT_MS') ?? '');
 const IDLE_TIMEOUT_MS = Number.isFinite(configuredSilence) && configuredSilence > 0 ? configuredSilence : 10 * 60_000;
 
@@ -46,10 +53,15 @@ const CATALOG_TTL_MS = 60_000;
 
 export type CatalogProvider = { id: string; name: string; models: string[] };
 
+type Failure = { tool: string; error: string };
+
 type Stream = {
   renderer: StreamRenderer;
+  /** Resolves the round that is currently waiting; replaced at the start of every prompt. */
   resolve: () => void;
   toolCalls: Array<{ tool: string; status?: string; input?: unknown }>;
+  /** Terminal tool errors of the current round, in order. */
+  failures: Failure[];
   /** Re-armed on every event for this session; fires after `IDLE_TIMEOUT_MS` of silence. */
   watchdog?: Timer;
   timedOut: boolean;
@@ -66,6 +78,38 @@ export type AskInput = {
   member: GuildMember | null;
   text: string;
 };
+
+/** The nudge sent to the same session after a round that ended on a failed tool call. */
+function continuationPrompt(userText: string, failures: Failure[]): string {
+  const detail = failures
+    .slice(0, 3)
+    .map(failure => `- ${failure.tool}: ${failure.error.slice(0, 300)}`)
+    .join('\n');
+  return [
+    '[system note] The previous round ended with a failed tool call, so the task is not finished:',
+    detail,
+    '',
+    `The original request was: ${userText.slice(0, 800)}`,
+    '',
+    'Continue now and finish the work. Do not repeat the failing call the same way: if it was refused by policy,',
+    'use an allowed path (inside `repo/`) or a different tool; if it failed for another reason, fix the cause.',
+    'Then verify the result and report what you actually did — not what you plan to do.',
+  ].join('\n');
+}
+
+/** A turn that still ended on failures says so, so the answer cannot read as a clean success. */
+function failureFooter(failures: Failure[], text: string): string {
+  if (failures.length === 0) return text;
+  const lines = [`⚠️ ${failures.length} tool call(s) failed and the turn ended there:`];
+  lines.push(
+    ...failures
+      .slice(0, 3)
+      .map(failure => `- \`${failure.tool}\`: ${failure.error.replace(/\s+/g, ' ').trim().slice(0, 200)}`),
+  );
+  if (failures.length > 3) lines.push(`- …and ${failures.length - 3} more`);
+  const quoted = lines.map(line => `> ${line}`).join('\n');
+  return `${text}\n\n${quoted}`;
+}
 
 /**
  * Owns the chat→session→stream lifecycle. One prompt per chat at a time (queued), one live message per
@@ -120,15 +164,20 @@ export class Runtime {
     const renderer = new StreamRenderer(input.channel, '🧠 thinking…');
     await renderer.start();
 
-    const idle = Promise.withResolvers<void>();
     const stream: Stream = {
       renderer,
-      'resolve': idle.resolve,
+      'resolve': () => undefined,
       'toolCalls': [],
+      'failures': [],
       'timedOut': false,
       'logged': new Set(),
     };
     this.streams.set(sessionId, stream);
+    /** A fresh promise per round: the same session is prompted again after a failed round. */
+    const waitIdle = (): Promise<void> =>
+      new Promise(resolve => {
+        stream.resolve = resolve;
+      });
 
     const rank = ['guest', 'member', 'trusted', 'admin', 'owner'][tierOf(input.guildId, input.member)];
     const prompt =
@@ -136,14 +185,37 @@ export class Runtime {
       memoryContext(input.guildId, input.text);
 
     try {
-      await server.opencode.prompt(sessionId, prompt, models.primary(input.guildId));
-      this.watch(sessionId, stream);
-      await idle.promise;
+      let finalText = '';
+      let carried: Failure[] = [];
+      for (let round = 0; round <= MAX_CONTINUATIONS; round += 1) {
+        const idle = waitIdle();
+        await server.opencode.prompt(
+          sessionId,
+          round === 0 ? prompt : continuationPrompt(input.text, carried),
+          models.primary(input.guildId),
+        );
+        this.watch(sessionId, stream);
+        await idle;
+
+        finalText = await server.opencode.lastText(sessionId).catch(() => '');
+        if (stream.timedOut || stream.failures.length === 0) break;
+        if (round === MAX_CONTINUATIONS) break;
+
+        // Copied before the tally is reset: the next round's prompt has to name what failed.
+        carried = [...stream.failures];
+        logger.info('continuing after failed tool calls', {
+          chatKey,
+          'round': round + 1,
+          'failures': carried.map(failure => failure.tool),
+        });
+        renderer.setStatus(`🔁 ${carried.length} tool call(s) failed — asking it to finish`);
+        stream.logged.clear();
+        stream.failures = [];
+      }
 
       if (stream.timedOut) await this.recoverSession(server, chatKey, sessionId);
-      const finalText = await server.opencode.lastText(sessionId).catch(() => '');
       const reasoning = await server.opencode.lastReasoning(sessionId).catch(() => '');
-      await renderer.finish(finalText, {
+      await renderer.finish(failureFooter(stream.failures, finalText), {
         'mentionId': input.actorId,
         reasoning,
         ...(stream.timedOut
@@ -235,6 +307,11 @@ export class Runtime {
       if ((status === 'completed' || status === 'error') && !stream.logged.has(part.id)) {
         stream.logged.add(part.id);
         stream.renderer.addStep(part.tool ?? 'tool', status);
+        if (status === 'error')
+          stream.failures.push({
+            'tool': part.tool ?? 'tool',
+            'error': part.state?.error ?? part.state?.output ?? 'failed with no error text',
+          });
       }
       return;
     }
@@ -313,13 +390,29 @@ export class Runtime {
     if (screen.verdict !== 'ask') {
       const reply = screen.verdict === 'allow' ? 'once' : 'reject';
       const ok = await server.opencode.replyPermission(event.properties.id, reply);
+      // Without this row an auto-refusal is invisible: the agent just reports a failed tool and nobody can
+      // tell whether it was a policy veto or a bug. `/audit` reads exactly this table.
+      audit.write({
+        'guildId': guildId,
+        'actorId': session.actor_id ?? 'unknown',
+        'channelId': session.channel_id,
+        'tool': `permission:${event.properties.permission}`,
+        'args': { 'patterns': event.properties.patterns },
+        'verdict': reply === 'once' ? 'allow' : 'deny',
+        'layer': 'vibe',
+        'detail': screen.reason,
+      });
       logger.info('permission auto-answered', {
         'requestID': event.properties.id,
         reply,
         'reason': screen.reason,
         'delivered': ok,
       });
-      if (screen.verdict === 'allow') stream?.renderer.setStatus(`😎 vibe: ${event.properties.permission} allowed`);
+      stream?.renderer.setStatus(
+        reply === 'once'
+          ? `😎 vibe: ${event.properties.permission} allowed`
+          : `🛑 vibe refused ${event.properties.permission}: ${screen.reason.slice(0, 90)}`,
+      );
       return;
     }
 

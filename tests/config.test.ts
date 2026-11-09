@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
+import { Runtime } from '@services/agent/runtime.ts';
 import { capabilityByName } from '@services/bridge/lookup.ts';
 import { guildDefaults, type GuildSettings } from '@services/config.ts';
+import { audit, sessions } from '@services/database/sqlite.ts';
 import { ceilingFor, decide, vibeVerdict } from '@services/policy/gate.ts';
 import {
   defaultFor,
@@ -261,5 +263,50 @@ describe('decide with a guild policy', () => {
     } as unknown as Parameters<typeof decide>[1];
     const decision = await decide('g', trusted, capabilityByName('member_kick'), { 'user_id': '2' });
     expect(decision.verdict).toBe('allow');
+  });
+
+  test('a vibe-mode permission decision is recorded so /audit can explain it', async () => {
+    // JEV_MODE=off in tests, so vibe runs unscreened and allows without the network.
+    useGuilds({ 'g': { 'enabled': true, 'policy': { 'mode': 'vibe' } } });
+    const sessionId = `ses_perm_${Date.now()}`;
+    sessions.set({
+      'chat_key': 'g:chan-perm',
+      'guild_id': 'g',
+      'channel_id': 'chan-perm',
+      'session_id': sessionId,
+      'actor_id': 'member-1',
+    });
+
+    const replies: string[] = [];
+    const opencode = {
+      'replyPermission': async (_id: string, reply: string) => {
+        replies.push(reply);
+        return true;
+      },
+    };
+    const runtime = new Runtime(
+      { 'channels': { 'fetch': async () => undefined }, 'guilds': { 'cache': new Map() } } as never,
+      {
+        'get': () => ({ opencode }),
+      } as never,
+    );
+
+    runtime.handleEvent('g', {
+      'type': 'permission.asked',
+      'properties': {
+        'id': 'per_1',
+        'sessionID': sessionId,
+        'permission': 'bash',
+        'patterns': ['bun test'],
+        'always': [],
+      },
+    } as never);
+    await Bun.sleep(50);
+
+    expect(replies).toEqual(['once']);
+    const row = audit.recent('g', 1)[0];
+    expect(row?.tool).toBe('permission:bash');
+    expect(row?.verdict).toBe('allow');
+    expect(row?.layer).toBe('vibe');
   });
 });

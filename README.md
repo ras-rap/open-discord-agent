@@ -199,7 +199,13 @@ Mentioning the bot or replying to one of its messages also starts a task.
    alone;
 3. approval cards are removed the moment they are decided, expired, or the turn ends — the record stays in
    `/audit` instead of in the channel;
-4. a turn is abandoned only after `IDLE_TIMEOUT_MS` (10 min) of **silence** — continuous streaming or tool
+4. a **round that ends on a failed tool call is continued, not accepted**: the same session is prompted again
+   with the error in hand (`🔁 … asking it to finish`), twice at most. That is what turns "Plan confirmed —
+   building…" plus a denied `write` into an actual result, or into an answer that says it could not do it;
+5. if it still ends on failures, the answer carries a `⚠️ N tool call(s) failed` quote listing the tool and the
+   error, so a turn can never read as a clean success when something broke. A policy refusal is recorded in
+   `/audit` (`layer: vibe`) whether it was made by a human or by Jev;
+6. a turn is abandoned only after `IDLE_TIMEOUT_MS` (10 min) of **silence** — continuous streaming or tool
    calls reset that clock, so slow work is never killed. On a timeout the session is aborted, the channel is
    rebound to a fresh session so the next message works normally, and the partial output is posted with a
    `⏱️ interrupted` note.
@@ -293,7 +299,9 @@ call, Jev is asked how destructive it is and whether an admin would approve:
 | otherwise | runs it |
 
 The agent server's own permission asks (`bash`, `edit` outside `repo/`, `webfetch`) go through the same screen,
-and a shell call is classed reversible inside the docker sandbox but destructive in `host` mode. Real readings
+and a shell call is classed reversible inside the docker sandbox but destructive in `host` mode. Every
+auto-decision lands in `/audit` with `layer: vibe`, so a refused write is explainable afterwards instead of
+appearing as a bare `✗ write` in the log. Real readings
 from a vibe-mode test: `message_send` allow (Jev: reversible, 0.67), `channel_delete` deny (destructive, 0.24),
 `permission_set Administrator` deny (0.45), `bash bun test` allow, `bash rm -rf /` deny (catastrophic),
 `edit /etc/passwd` ask (an unconfident "safe" reading).

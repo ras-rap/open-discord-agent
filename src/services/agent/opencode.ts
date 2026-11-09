@@ -69,10 +69,13 @@ export class Opencode {
   async lastText(sessionID: string): Promise<string> {
     const res = await this.client.session.messages({ 'path': { 'id': sessionID } });
     const assistant = [...(res.data ?? [])].reverse().find(entry => entry.info.role === 'assistant');
+    // Separate, not concatenate: one answer can arrive as several text parts around a tool call, and joining
+    // them bare produced sentences like "…your setup.Plan confirmed…" in the channel.
     return (assistant?.parts ?? [])
       .filter((part): part is TextPart => part.type === 'text')
-      .map(part => part.text)
-      .join('');
+      .map(part => part.text.trim())
+      .filter(text => text.length > 0)
+      .join('\n\n');
   }
 
   /**
